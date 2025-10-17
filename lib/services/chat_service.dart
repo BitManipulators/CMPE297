@@ -1,21 +1,16 @@
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:image_picker/image_picker.dart';
 // import 'package:uuid/uuid.dart'; // Removed due to dependency issues
 import '../models/chat_message.dart';
-import 'ai_model_interface.dart';
-import 'ai_model_service_web.dart';
-import 'ai_model_service_android.dart';
 
 class ChatService extends ChangeNotifier {
   final List<ChatMessage> _messages = [];
   final SpeechToText _speechToText = SpeechToText();
   final ImagePicker _imagePicker = ImagePicker();
-  late final AIModelInterface _aiModelService;
   bool _isListening = false;
   bool _isLoading = false;
 
@@ -24,22 +19,12 @@ class ChatService extends ChangeNotifier {
   bool get isLoading => _isLoading;
 
   ChatService() {
-    if (kIsWeb) {
-      _aiModelService = AIModelServiceWeb();
-    } else {
-      _aiModelService = AIModelServiceAndroid();
-    }
     _loadMessages();
     _initializeSpeech();
-    _initializeAI();
   }
 
   Future<void> _initializeSpeech() async {
     await _speechToText.initialize();
-  }
-
-  Future<void> _initializeAI() async {
-    await _aiModelService.initializeModel();
   }
 
   Future<void> _loadMessages() async {
@@ -113,32 +98,27 @@ class ChatService extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    try {
-      // Use AI model to generate intelligent response
-      final aiResponse = await _aiModelService.generateResponse(userMessage.text);
+    // Simulate processing delay
+    await Future.delayed(const Duration(seconds: 1));
 
-      final botMessage = ChatMessage(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: aiResponse,
-        createdAt: DateTime.now(),
-        isUser: false,
-      );
+    final responses = [
+      "You said: ${userMessage.text}",
+      "Interesting! Tell me more about that.",
+      "I understand you mentioned: ${userMessage.text}",
+      "That's a great observation!",
+      "I'm here to help with survival guidance. What else would you like to know?",
+    ];
 
-      _messages.add(botMessage);
-    } catch (e) {
-      debugPrint('Error generating AI response: $e');
+    final randomResponse = responses[DateTime.now().millisecond % responses.length];
 
-      // Fallback to simple response if AI fails
-      final fallbackMessage = ChatMessage(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: "I'm here to help with survival guidance and nature questions. What would you like to know?",
-        createdAt: DateTime.now(),
-        isUser: false,
-      );
+    final botMessage = ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      text: randomResponse,
+      createdAt: DateTime.now(),
+      isUser: false,
+    );
 
-      _messages.add(fallbackMessage);
-    }
-
+    _messages.add(botMessage);
     _isLoading = false;
     notifyListeners();
     await _saveMessages();
@@ -148,32 +128,24 @@ class ChatService extends ChangeNotifier {
     _isLoading = true;
     notifyListeners();
 
-    try {
-      // For now, provide a response about image analysis capabilities
-      // In the next phase, we'll integrate actual image recognition
-      final imageResponse = await _aiModelService.generateResponse("I've shared an image for analysis");
+    await Future.delayed(const Duration(seconds: 2));
 
-      final botMessage = ChatMessage(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: "📷 I can see you've shared an image! While I can provide general survival and nature guidance, detailed image analysis for plant/animal identification will be enhanced in the next update. For now, I can help with general outdoor safety and survival tips based on your description of what you see.",
-        createdAt: DateTime.now(),
-        isUser: false,
-      );
+    final imageResponses = [
+      "I can see you've shared an image! Once I'm connected to plant recognition, I'll be able to identify what you're looking at.",
+      "📷 Nice image! I'm ready to help identify plants and provide survival tips once the AI is integrated.",
+      "I see you've captured something interesting! The image recognition feature will be available soon.",
+    ];
 
-      _messages.add(botMessage);
-    } catch (e) {
-      debugPrint('Error generating image response: $e');
+    final randomResponse = imageResponses[DateTime.now().millisecond % imageResponses.length];
 
-      final fallbackMessage = ChatMessage(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: "📷 I can see your image! I'm ready to help with survival guidance and nature questions. Describe what you see and I'll provide relevant advice.",
-        createdAt: DateTime.now(),
-        isUser: false,
-      );
+    final botMessage = ChatMessage(
+      id: DateTime.now().millisecondsSinceEpoch.toString(),
+      text: randomResponse,
+      createdAt: DateTime.now(),
+      isUser: false,
+    );
 
-      _messages.add(fallbackMessage);
-    }
-
+    _messages.add(botMessage);
     _isLoading = false;
     notifyListeners();
     await _saveMessages();

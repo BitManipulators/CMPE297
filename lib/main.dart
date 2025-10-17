@@ -1,13 +1,9 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:provider/provider.dart';
-import 'screens/chat_screen.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'screens/simple_chat_screen.dart';
 import 'services/permission_service.dart';
 import 'services/chat_service.dart';
-import 'services/ai_model_interface.dart';
-import 'services/ai_model_service_web.dart';
-import 'services/ai_model_service_android.dart';
 
 void main() {
   runApp(const IntoTheWildApp());
@@ -22,13 +18,6 @@ class IntoTheWildApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => ChatService()),
         ChangeNotifierProvider(create: (_) => PermissionService()),
-        Provider<AIModelInterface>(create: (_) {
-          if (kIsWeb) {
-            return AIModelServiceWeb();
-          } else {
-            return AIModelServiceAndroid();
-          }
-        }),
       ],
       child: MaterialApp(
         title: 'IntoTheWild',
@@ -41,7 +30,7 @@ class IntoTheWildApp extends StatelessWidget {
             elevation: 0,
           ),
         ),
-        home: const ChatScreen(),
+        home: const SimpleChatScreen(),
         debugShowCheckedModeBanner: false,
       ),
     );

@@ -12,30 +12,26 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Chat UI
-  dash_chat_2: ^0.0.21
+  # Chat UI - removed dash_chat_2 due to compatibility issues
 
   # Image handling
-  image_picker: ^1.0.7
+  image_picker: ^1.0.4
 
   # Speech functionality
-  speech_to_text: ^7.0.0
-  flutter_tts: ^4.2.3
+  speech_to_text: ^6.6.0
+  flutter_tts: ^3.8.5
 
   # Permissions
-  permission_handler: ^12.0.1
+  permission_handler: ^11.0.1
 
   # File system
-  path_provider: ^2.1.2
+  path_provider: ^2.1.1
 
   # JSON handling
-  json_annotation: ^4.9.0
+  json_annotation: ^4.8.1
 
   # State management
-  provider: ^6.1.2
-
-  # AI/ML dependencies - Ready for real AI model integration
-  ffi: ^2.1.0
+  provider: ^6.1.1
 
 dev_dependencies:
   flutter_test:

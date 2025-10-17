@@ -57,4 +57,3 @@ class PermissionService extends ChangeNotifier {
     return _storagePermission;
   }
 }
-

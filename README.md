@@ -4,7 +4,7 @@ A Flutter mobile chat application for survival guidance and plant recognition wi
 
 ## Features
 
-- 📱 WhatsApp-style chat UI using dash_chat_2
+- 📱 WhatsApp-style chat UI using custom implementation
 - 🎙️ Voice input with speech-to-text
 - 📷 Camera and gallery image input
 - 💬 Text messaging with mock responses
@@ -55,7 +55,7 @@ lib/
 │   ├── chat_service.dart    # Chat logic and state management
 │   └── permission_service.dart # Permission handling
 ├── screens/
-│   └── chat_screen.dart     # Main chat interface
+│   └── simple_chat_screen.dart # Main chat interface
 └── widgets/
     └── input_buttons.dart   # Voice and camera input buttons
 ```
@@ -77,7 +77,7 @@ The app requires the following Android permissions:
 
 ## Current Features
 
-- ✅ WhatsApp-style chat UI
+- ✅ WhatsApp-style chat UI (custom implementation)
 - ✅ Text input with send button
 - ✅ Voice input (speech-to-text)
 - ✅ Camera and gallery image input
@@ -95,7 +95,6 @@ This scaffold is ready for:
 
 ## Dependencies
 
-- `dash_chat_2` - Chat UI components
 - `image_picker` - Camera and gallery access
 - `speech_to_text` - Voice input
 - `flutter_tts` - Text-to-speech (ready for future use)
@@ -117,4 +116,3 @@ If you encounter issues:
 3. **Build errors**: Run `flutter clean` and `flutter pub get`
 
 4. **Dependencies issues**: Check that all packages are compatible with your Flutter version
-

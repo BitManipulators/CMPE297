@@ -36,4 +36,3 @@ echo ""
 echo "To run on a specific device:"
 echo "  flutter devices"
 echo "  flutter run -d <device-id>"
-
