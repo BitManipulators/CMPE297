@@ -1,0 +1,51 @@
+name: into_the_wild
+description: A Flutter mobile chat application for survival guidance and plant recognition.
+
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.8.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Chat UI
+  dash_chat_2: ^0.0.21
+
+  # Image handling
+  image_picker: ^1.0.7
+
+  # Speech functionality
+  speech_to_text: ^7.0.0
+  flutter_tts: ^4.2.3
+
+  # Permissions
+  permission_handler: ^12.0.1
+
+  # File system
+  path_provider: ^2.1.2
+
+  # JSON handling
+  json_annotation: ^4.9.0
+
+  # State management
+  provider: ^6.1.2
+
+  # AI/ML dependencies - Ready for real AI model integration
+  ffi: ^2.1.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+  json_serializable: ^6.7.1
+  build_runner: ^2.4.7
+
+flutter:
+  uses-material-design: true
+
+  assets:
+    - assets/images/
