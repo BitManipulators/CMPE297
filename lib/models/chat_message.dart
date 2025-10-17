@@ -1,4 +1,5 @@
 import 'package:json_annotation/json_annotation.dart';
+import 'package:dash_chat_2/dash_chat_2.dart';
 
 part 'chat_message.g.dart';
 
@@ -24,6 +25,15 @@ class ChatMessage {
       _$ChatMessageFromJson(json);
 
   Map<String, dynamic> toJson() => _$ChatMessageToJson(this);
+
+  ChatMessage toDashChatMessage() {
+    return ChatMessage(
+      id: id,
+      text: text,
+      createdAt: createdAt,
+      isUser: isUser,
+    );
+  }
 }
 
 enum MessageType {

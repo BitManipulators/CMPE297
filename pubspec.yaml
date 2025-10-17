@@ -12,7 +12,8 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # Chat UI - removed dash_chat_2 due to compatibility issues
+  # Chat UI
+  dash_chat_2: ^0.0.21
 
   # Image handling
   image_picker: ^1.0.4
