@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:dash_chat_2/dash_chat_2.dart';
 import '../services/chat_service.dart';
-import '../services/permission_service.dart';
 import '../widgets/input_buttons.dart';
 
 class ChatScreen extends StatefulWidget {
@@ -18,9 +17,6 @@ class _ChatScreenState extends State<ChatScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PermissionService>().requestPermissions();
-    });
   }
 
   @override
@@ -42,6 +38,18 @@ class _ChatScreenState extends State<ChatScreen> {
         ),
         centerTitle: true,
         actions: [
+          Consumer<ChatService>(
+            builder: (context, chatService, child) {
+              return IconButton(
+                icon: Icon(
+                  chatService.aiInitialized ? Icons.smart_toy : Icons.smart_toy_outlined,
+                  color: chatService.aiInitialized ? Colors.green : Colors.orange,
+                ),
+                onPressed: () => _showAIStatusDialog(chatService),
+                tooltip: chatService.aiInitialized ? 'AI Ready' : 'AI Loading...',
+              );
+            },
+          ),
           IconButton(
             icon: const Icon(Icons.clear_all),
             onPressed: () => _showClearDialog(),
@@ -116,6 +124,53 @@ class _ChatScreenState extends State<ChatScreen> {
                 Navigator.of(context).pop();
               },
               child: const Text('Clear'),
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  void _showAIStatusDialog(ChatService chatService) {
+    showDialog(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: Row(
+            children: [
+              Icon(
+                chatService.aiInitialized ? Icons.smart_toy : Icons.smart_toy_outlined,
+                color: chatService.aiInitialized ? Colors.green : Colors.orange,
+              ),
+              const SizedBox(width: 8),
+              Text(chatService.aiInitialized ? 'AI Ready' : 'AI Status'),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                chatService.aiInitialized
+                  ? 'AI model is loaded and ready to help with survival guidance!'
+                  : 'AI model is still loading. Please wait...',
+                style: const TextStyle(fontSize: 16),
+              ),
+              if (!chatService.aiInitialized) ...[
+                const SizedBox(height: 16),
+                const LinearProgressIndicator(),
+                const SizedBox(height: 8),
+                const Text(
+                  'This may take a few minutes on first launch.',
+                  style: TextStyle(fontSize: 12, color: Colors.grey),
+                ),
+              ],
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(),
+              child: const Text('OK'),
             ),
           ],
         );

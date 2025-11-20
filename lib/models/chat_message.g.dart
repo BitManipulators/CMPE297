@@ -15,6 +15,11 @@ ChatMessage _$ChatMessageFromJson(Map<String, dynamic> json) => ChatMessage(
   type:
       $enumDecodeNullable(_$MessageTypeEnumMap, json['type']) ??
       MessageType.text,
+  userId: json['userId'] as String?,
+  userName: json['userName'] as String?,
+  conversationId: json['conversationId'] as String?,
+  isBot: json['isBot'] as bool? ?? false,
+  clientMessageId: json['clientMessageId'] as String?,
 );
 
 Map<String, dynamic> _$ChatMessageToJson(ChatMessage instance) =>
@@ -25,6 +30,11 @@ Map<String, dynamic> _$ChatMessageToJson(ChatMessage instance) =>
       'isUser': instance.isUser,
       'imageUrl': instance.imageUrl,
       'type': _$MessageTypeEnumMap[instance.type]!,
+      'userId': instance.userId,
+      'userName': instance.userName,
+      'conversationId': instance.conversationId,
+      'isBot': instance.isBot,
+      'clientMessageId': instance.clientMessageId,
     };
 
 const _$MessageTypeEnumMap = {

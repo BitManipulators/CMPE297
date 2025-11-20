@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:permission_handler/permission_handler.dart';
-import 'screens/simple_chat_screen.dart';
-import 'services/permission_service.dart';
+import 'screens/login_screen.dart';
+import 'screens/conversation_list_screen.dart';
 import 'services/chat_service.dart';
+import 'services/auth_service.dart';
+import 'services/websocket_service.dart';
+import 'services/conversation_service.dart';
 
 void main() {
   runApp(const IntoTheWildApp());
@@ -16,8 +18,10 @@ class IntoTheWildApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return MultiProvider(
       providers: [
+        ChangeNotifierProvider(create: (_) => AuthService()),
+        ChangeNotifierProvider(create: (_) => WebSocketService()),
+        ChangeNotifierProvider(create: (_) => ConversationService()),
         ChangeNotifierProvider(create: (_) => ChatService()),
-        ChangeNotifierProvider(create: (_) => PermissionService()),
       ],
       child: MaterialApp(
         title: 'IntoTheWild',
@@ -30,9 +34,29 @@ class IntoTheWildApp extends StatelessWidget {
             elevation: 0,
           ),
         ),
-        home: const SimpleChatScreen(),
+        home: const AppInitializer(),
         debugShowCheckedModeBanner: false,
       ),
     );
+  }
+}
+
+class AppInitializer extends StatefulWidget {
+  const AppInitializer({super.key});
+
+  @override
+  State<AppInitializer> createState() => _AppInitializerState();
+}
+
+class _AppInitializerState extends State<AppInitializer> {
+  @override
+  Widget build(BuildContext context) {
+    final authService = context.watch<AuthService>();
+
+    if (authService.isAuthenticated) {
+      return const ConversationListScreen();
+    } else {
+      return const LoginScreen();
+    }
   }
 }

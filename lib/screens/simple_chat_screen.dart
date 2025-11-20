@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/chat_service.dart';
-import '../services/permission_service.dart';
 import '../widgets/input_buttons.dart';
 
 class SimpleChatScreen extends StatefulWidget {
@@ -18,9 +17,6 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<PermissionService>().requestPermissions();
-    });
   }
 
   @override
@@ -50,88 +46,95 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
           ),
         ],
       ),
-      body: Column(
-        children: [
-          Expanded(
-            child: Consumer<ChatService>(
-              builder: (context, chatService, child) {
-                return ListView.builder(
-                  controller: _scrollController,
-                  padding: const EdgeInsets.all(16),
-                  itemCount: chatService.messages.length,
-                  itemBuilder: (context, index) {
-                    final message = chatService.messages[index];
-                    return _buildMessageBubble(message);
-                  },
-                );
-              },
+      body: SafeArea(
+        child: Column(
+          children: [
+            Expanded(
+              child: Consumer<ChatService>(
+                builder: (context, chatService, child) {
+                  return ListView.builder(
+                    controller: _scrollController,
+                    padding: const EdgeInsets.all(16),
+                    itemCount: chatService.messages.length,
+                    itemBuilder: (context, index) {
+                      final message = chatService.messages[index];
+                      return _buildMessageBubble(message);
+                    },
+                  );
+                },
+              ),
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.grey.withOpacity(0.2),
-                  spreadRadius: 1,
-                  blurRadius: 5,
-                  offset: const Offset(0, -3),
-                ),
-              ],
-            ),
-            child: Row(
-              children: [
-                Expanded(
-                  child: TextField(
-                    controller: _textController,
-                    decoration: InputDecoration(
-                      hintText: "Type your message...",
-                      border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(25),
-                        borderSide: const BorderSide(color: Color(0xFF2E7D32)),
-                      ),
-                      focusedBorder: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(25),
-                        borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 2),
-                      ),
-                    ),
-                    onSubmitted: (text) => _sendMessage(),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.grey.withOpacity(0.2),
+                    spreadRadius: 1,
+                    blurRadius: 5,
+                    offset: const Offset(0, -3),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Consumer<ChatService>(
-                  builder: (context, chatService, child) {
-                    if (chatService.isLoading) {
-                      return const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2E7D32)),
+                ],
+              ),
+              child: Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _textController,
+                      decoration: InputDecoration(
+                        hintText: "Type your message...",
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(25),
+                          borderSide: const BorderSide(color: Color(0xFF2E7D32)),
+                        ),
+                        focusedBorder: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(25),
+                          borderSide: const BorderSide(color: Color(0xFF2E7D32), width: 2),
+                        ),
+                      ),
+                      onSubmitted: (text) => _sendMessage(),
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Consumer<ChatService>(
+                    builder: (context, chatService, child) {
+                      if (chatService.isLoading) {
+                        return const SizedBox(
+                          width: 20,
+                          height: 20,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            valueColor: AlwaysStoppedAnimation<Color>(Color(0xFF2E7D32)),
+                          ),
+                        );
+                      }
+                      return IconButton(
+                        onPressed: _sendMessage,
+                        icon: const Icon(
+                          Icons.send,
+                          color: Color(0xFF2E7D32),
                         ),
                       );
-                    }
-                    return IconButton(
-                      onPressed: _sendMessage,
-                      icon: const Icon(
-                        Icons.send,
-                        color: Color(0xFF2E7D32),
-                      ),
-                    );
-                  },
-                ),
-              ],
+                    },
+                  ),
+                ],
+              ),
             ),
-          ),
-          const InputButtons(),
-        ],
+            const InputButtons(),
+          ],
+        ),
       ),
     );
   }
 
   Widget _buildMessageBubble(dynamic message) {
     final isUser = message.isUser;
+    final isBot = message.isBot ?? false;
+    final userName = message.userName ?? (isBot ? 'AI Bot' : 'User');
+    final displayName = isBot ? 'AI Bot' : (isUser ? 'You' : userName);
+
     return Container(
       margin: const EdgeInsets.only(bottom: 8),
       child: Row(
@@ -140,10 +143,10 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
           if (!isUser) ...[
             CircleAvatar(
               radius: 16,
-              backgroundColor: const Color(0xFF2E7D32),
-              child: const Text(
-                'B',
-                style: TextStyle(color: Colors.white, fontSize: 12),
+              backgroundColor: isBot ? const Color(0xFF2E7D32) : Colors.blue,
+              child: Text(
+                displayName[0].toUpperCase(),
+                style: const TextStyle(color: Colors.white, fontSize: 12),
               ),
             ),
             const SizedBox(width: 8),
@@ -159,12 +162,12 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   if (!isUser)
-                    const Text(
-                      'Survival Bot',
+                    Text(
+                      displayName,
                       style: TextStyle(
                         fontWeight: FontWeight.bold,
                         fontSize: 12,
-                        color: Color(0xFF2E7D32),
+                        color: isBot ? const Color(0xFF2E7D32) : Colors.blue,
                       ),
                     ),
                   if (message.imageUrl != null) ...[

@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/chat_service.dart';
-import '../services/permission_service.dart';
 
 class InputButtons extends StatelessWidget {
   const InputButtons({super.key});
@@ -9,7 +8,7 @@ class InputButtons extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
         color: Colors.white,
         boxShadow: [
@@ -24,12 +23,12 @@ class InputButtons extends StatelessWidget {
       child: Row(
         children: [
           // Microphone Button
-          Consumer2<ChatService, PermissionService>(
-            builder: (context, chatService, permissionService, child) {
+          Consumer<ChatService>(
+            builder: (context, chatService, child) {
               return IconButton(
                 onPressed: chatService.isListening
                     ? () => chatService.stopListening()
-                    : () => _handleVoiceInput(context, chatService, permissionService),
+                    : () => _handleVoiceInput(context, chatService),
                 icon: Icon(
                   chatService.isListening ? Icons.stop : Icons.mic,
                   color: chatService.isListening ? Colors.red : const Color(0xFF2E7D32),
@@ -41,10 +40,10 @@ class InputButtons extends StatelessWidget {
           ),
 
           // Camera Button
-          Consumer2<ChatService, PermissionService>(
-            builder: (context, chatService, permissionService, child) {
+          Consumer<ChatService>(
+            builder: (context, chatService, child) {
               return IconButton(
-                onPressed: () => _handleImageInput(context, chatService, permissionService),
+                onPressed: () => _handleImageInput(context, chatService),
                 icon: const Icon(
                   Icons.camera_alt,
                   color: Color(0xFF2E7D32),
@@ -56,10 +55,10 @@ class InputButtons extends StatelessWidget {
           ),
 
           // Gallery Button
-          Consumer2<ChatService, PermissionService>(
-            builder: (context, chatService, permissionService, child) {
+          Consumer<ChatService>(
+            builder: (context, chatService, child) {
               return IconButton(
-                onPressed: () => _handleGalleryInput(context, chatService, permissionService),
+                onPressed: () => _handleGalleryInput(context, chatService),
                 icon: const Icon(
                   Icons.photo_library,
                   color: Color(0xFF2E7D32),
@@ -96,18 +95,7 @@ class InputButtons extends StatelessWidget {
   Future<void> _handleVoiceInput(
     BuildContext context,
     ChatService chatService,
-    PermissionService permissionService,
   ) async {
-    if (!await permissionService.checkMicrophonePermission()) {
-      _showPermissionDialog(
-        context,
-        'Microphone Permission',
-        'This app needs microphone permission to record voice messages.',
-        () => permissionService.requestPermissions(),
-      );
-      return;
-    }
-
     if (chatService.isListening) {
       await chatService.stopListening();
     } else {
@@ -118,18 +106,7 @@ class InputButtons extends StatelessWidget {
   Future<void> _handleImageInput(
     BuildContext context,
     ChatService chatService,
-    PermissionService permissionService,
   ) async {
-    if (!await permissionService.checkCameraPermission()) {
-      _showPermissionDialog(
-        context,
-        'Camera Permission',
-        'This app needs camera permission to take photos.',
-        () => permissionService.requestPermissions(),
-      );
-      return;
-    }
-
     final imagePath = await chatService.pickImageFromCamera();
     if (imagePath != null) {
       await chatService.sendImageMessage(imagePath);
@@ -139,51 +116,10 @@ class InputButtons extends StatelessWidget {
   Future<void> _handleGalleryInput(
     BuildContext context,
     ChatService chatService,
-    PermissionService permissionService,
   ) async {
-    if (!await permissionService.checkStoragePermission()) {
-      _showPermissionDialog(
-        context,
-        'Storage Permission',
-        'This app needs storage permission to access photos.',
-        () => permissionService.requestPermissions(),
-      );
-      return;
-    }
-
     final imagePath = await chatService.pickImageFromGallery();
     if (imagePath != null) {
       await chatService.sendImageMessage(imagePath);
     }
-  }
-
-  void _showPermissionDialog(
-    BuildContext context,
-    String title,
-    String message,
-    VoidCallback onRequest,
-  ) {
-    showDialog(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: Text(title),
-          content: Text(message),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(),
-              child: const Text('Cancel'),
-            ),
-            TextButton(
-              onPressed: () {
-                Navigator.of(context).pop();
-                onRequest();
-              },
-              child: const Text('Grant Permission'),
-            ),
-          ],
-        );
-      },
-    );
   }
 }
