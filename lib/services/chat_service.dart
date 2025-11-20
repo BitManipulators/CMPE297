@@ -17,6 +17,8 @@ class ChatService extends ChangeNotifier {
   bool _isListening = false;
   bool _isLoading = false;
   String? _currentConversationId;
+  bool _isLoadingConversation = false; // Flag to track if we're currently loading a conversation
+  bool _conversationHistoryReceived = false; // Flag to track if conversation_history was received during loading
 
   // Services (injected via constructor or setter)
   WebSocketService? _webSocketService;
@@ -244,6 +246,56 @@ class ChatService extends ChangeNotifier {
               debugPrint('Loading conversation history: ${messagesList.length} messages');
               final currentUserId = _authService?.currentUser?.id;
 
+              // If we're currently loading the conversation via API, don't clear messages
+              // The API load already populated them, and we just need to merge/update
+              if (_isLoadingConversation) {
+                debugPrint('Conversation is being loaded via API, handling conversation_history');
+                _conversationHistoryReceived = true; // Mark that we received history
+
+                final historyMessages = messagesList
+                    .map((msg) => ChatMessage.fromJson(msg, currentUserId: currentUserId))
+                    .toList();
+
+                // If messages are already loaded from API, check for duplicates
+                if (_messages.isNotEmpty) {
+                  debugPrint('Messages already loaded from API, checking for duplicates');
+                  final existingIds = _messages.map((m) => m.id).toSet();
+                  final historyIds = historyMessages.map((m) => m.id).toSet();
+
+                  if (existingIds.length == historyIds.length &&
+                      existingIds.every((id) => historyIds.contains(id))) {
+                    debugPrint('Messages already loaded from API, skipping conversation_history');
+                    _isLoadingConversation = false; // Reset flag since we're done
+                    _conversationHistoryReceived = false;
+                    return; // Exit early, messages are already loaded
+                  }
+
+                  // Merge messages: add only new ones that don't exist
+                  for (final historyMsg in historyMessages) {
+                    final exists = _messages.any((m) => m.id == historyMsg.id);
+                    if (!exists) {
+                      _messages.add(historyMsg);
+                    }
+                  }
+
+                  // Sort messages by timestamp to maintain order
+                  _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+                  _isLoadingConversation = false; // Reset flag after merging
+                  _conversationHistoryReceived = false;
+                  notifyListeners();
+                  return; // Exit early, don't clear messages
+                } else {
+                  // Messages not loaded from API yet, but conversation_history arrived first
+                  // Add the messages now, and API will skip loading
+                  debugPrint('conversation_history arrived before API load, adding messages now');
+                  _messages.addAll(historyMessages);
+                  _isLoadingConversation = false; // Reset flag since we got history
+                  _conversationHistoryReceived = false;
+                  notifyListeners();
+                  return; // Exit early, don't clear messages
+                }
+              }
+
               // Preserve optimistic messages (those with clientMessageId) when loading history
               // Only preserve messages that are recent (sent in last 10 seconds) to avoid keeping stale ones
               final now = DateTime.now();
@@ -255,12 +307,26 @@ class ChatService extends ChangeNotifier {
 
               debugPrint('Preserving ${optimisticMessages.length} recent optimistic messages');
 
-              // Clear and reload from history
-              _messages.clear();
+              // Before clearing, check if we're in the middle of handling a message for different conversation
+              // If so, we should merge instead of clearing to avoid losing the message that triggered the load
               final historyMessages = messagesList
                   .map((msg) => ChatMessage.fromJson(msg, currentUserId: currentUserId))
                   .toList();
 
+              // Check if all history messages already exist in current messages
+              final existingIds = _messages.map((m) => m.id).toSet();
+              final historyIds = historyMessages.map((m) => m.id).toSet();
+
+              if (existingIds.length == historyIds.length &&
+                  existingIds.every((id) => historyIds.contains(id))) {
+                debugPrint('All conversation_history messages already exist, skipping reload');
+                // Just update isUser flags if needed
+                notifyListeners();
+                return;
+              }
+
+              // Clear and reload from history
+              _messages.clear();
               _messages.addAll(historyMessages);
 
               // Re-add optimistic messages that haven't been confirmed yet
@@ -307,37 +373,93 @@ class ChatService extends ChangeNotifier {
   Future<void> loadConversation(String conversationId) async {
     _currentConversationId = conversationId;
     _messages.clear();
+    _isLoadingConversation = true; // Set flag to prevent conversation_history from clearing
+    _conversationHistoryReceived = false; // Reset flag
 
-    // Join conversation via WebSocket
-    _webSocketService?.joinConversation(conversationId);
+    try {
+      // Join conversation via WebSocket (this will trigger conversation_history)
+      _webSocketService?.joinConversation(conversationId);
 
-    // Load messages from API
-    if (_conversationService != null) {
-      final loadedMessages = await _conversationService!.getMessages(conversationId);
-      final currentUserId = _authService?.currentUser?.id;
+      // Load messages from API
+      if (_conversationService != null) {
+        final loadedMessages = await _conversationService!.getMessages(conversationId);
 
-      // Update isUser for each message based on current user
-      final messagesWithIsUser = loadedMessages.map((msg) {
-        if (currentUserId != null && msg.userId == currentUserId) {
-          // Create a new message with isUser set correctly
-          return ChatMessage(
-            id: msg.id,
-            text: msg.text,
-            createdAt: msg.createdAt,
-            isUser: true,
-            imageUrl: msg.imageUrl,
-            type: msg.type,
-            userId: msg.userId,
-            userName: msg.userName,
-            conversationId: msg.conversationId,
-            isBot: msg.isBot,
-          );
+        // If conversation_history already arrived and populated messages, skip API loading
+        if (_conversationHistoryReceived && _messages.isNotEmpty) {
+          debugPrint('conversation_history already loaded messages, skipping API load');
+          // Update isUser flags for existing messages (rebuild list since ChatMessage is immutable)
+          final currentUserId = _authService?.currentUser?.id;
+          if (currentUserId != null) {
+            final updatedMessages = _messages.map((msg) {
+              if (msg.userId == currentUserId && !msg.isUser) {
+                return ChatMessage(
+                  id: msg.id,
+                  text: msg.text,
+                  createdAt: msg.createdAt,
+                  isUser: true,
+                  imageUrl: msg.imageUrl,
+                  type: msg.type,
+                  userId: msg.userId,
+                  userName: msg.userName,
+                  conversationId: msg.conversationId,
+                  isBot: msg.isBot,
+                  clientMessageId: msg.clientMessageId,
+                );
+              }
+              return msg;
+            }).toList();
+            _messages.clear();
+            _messages.addAll(updatedMessages);
+          }
+          _isLoadingConversation = false;
+          notifyListeners();
+          return;
         }
-        return msg;
-      }).toList();
 
-      _messages.addAll(messagesWithIsUser);
-      notifyListeners();
+        final currentUserId = _authService?.currentUser?.id;
+
+        // Update isUser for each message based on current user
+        final messagesWithIsUser = loadedMessages.map((msg) {
+          if (currentUserId != null && msg.userId == currentUserId) {
+            // Create a new message with isUser set correctly
+            return ChatMessage(
+              id: msg.id,
+              text: msg.text,
+              createdAt: msg.createdAt,
+              isUser: true,
+              imageUrl: msg.imageUrl,
+              type: msg.type,
+              userId: msg.userId,
+              userName: msg.userName,
+              conversationId: msg.conversationId,
+              isBot: msg.isBot,
+            );
+          }
+          return msg;
+        }).toList();
+
+        // Only add messages if they don't already exist (in case conversation_history added them)
+        for (final msg in messagesWithIsUser) {
+          final exists = _messages.any((m) => m.id == msg.id);
+          if (!exists) {
+            _messages.add(msg);
+          }
+        }
+
+        // Sort messages by timestamp to maintain order
+        _messages.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+        _isLoadingConversation = false;
+        notifyListeners();
+      }
+    } finally {
+      // Reset flag after a delay as fallback (in case conversation_history never arrives)
+      Future.delayed(const Duration(milliseconds: 2000), () {
+        if (_isLoadingConversation) {
+          debugPrint('Resetting _isLoadingConversation flag after timeout');
+          _isLoadingConversation = false;
+          _conversationHistoryReceived = false;
+        }
+      });
     }
   }
 
@@ -568,13 +690,19 @@ class ChatService extends ChangeNotifier {
         _conversationService!.setCurrentConversation(conversation);
 
         // Load the conversation and switch to it
+        // Note: loadConversation() will trigger conversation_history which includes this message
+        // So we don't need to manually add it - conversation_history will handle it
         await loadConversation(message.conversationId!);
-        // Add the message after loading
+
+        // Double-check: if message still doesn't exist after loading, add it
+        // This handles the edge case where conversation_history doesn't include it
         final exists = _messages.any((m) => m.id == message.id);
         if (!exists) {
+          debugPrint('Message not found after loadConversation, adding manually: ${message.text}');
           _messages.add(message);
           notifyListeners();
-          debugPrint('Message added after loading conversation: ${message.text}');
+        } else {
+          debugPrint('Message already loaded via conversation_history: ${message.text}');
         }
       } else {
         debugPrint('User is not a participant in this conversation. Ignoring message.');
