@@ -3,7 +3,7 @@ FastAPI Backend Server for Multi-User Chat with AI Support
 Supports WebSocket for real-time messaging and /bot command to add AI to conversations
 """
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Body
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Depends, Body, Query
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Dict, Optional
 import json
@@ -343,6 +343,17 @@ async def create_conversation(request: CreateConversationRequest):
     }
 
     await save_conversation(conversation)
+
+    # If it's a group, broadcast to all connected users so they can see it
+    if request.type == "group":
+        group_created_message = {
+            "type": "group_created",
+            "conversation": conversation
+        }
+        # Broadcast to all connected users
+        for user_id in manager.active_connections.keys():
+            await manager.send_personal_message(group_created_message, user_id)
+
     return conversation
 
 
@@ -360,6 +371,102 @@ async def get_messages_endpoint(conversation_id: str, limit: int = 50):
     """Get messages for a conversation"""
     messages = await get_messages(conversation_id, limit)
     return {"messages": messages}
+
+
+@app.get("/api/conversations")
+async def get_all_conversations(user_id: Optional[str] = Query(None, description="User ID to filter conversations")):
+    """Get all conversations. For groups, return all groups. For one-to-one, return only user's conversations."""
+
+    if db:
+        # Get all conversations from Firebase
+        convs_ref = db.collection("conversations")
+        docs = convs_ref.stream()
+        all_convs = [doc.to_dict() for doc in docs]
+    elif supabase_client:
+        # Get all conversations from Supabase
+        response = supabase_client.table("conversations").select("*").execute()
+        all_convs = response.data
+    else:
+        # In-memory storage
+        all_convs = list(conversations.values())
+
+    # Filter: return all groups, but only one-to-one conversations where user is a participant
+    if user_id:
+        filtered_convs = [
+            conv for conv in all_convs
+            if conv.get("type") == "group" or (conv.get("type") == "one_to_one" and user_id in conv.get("participants", []))
+        ]
+    else:
+        # If no user_id provided, return all groups only
+        filtered_convs = [conv for conv in all_convs if conv.get("type") == "group"]
+
+    return {"conversations": filtered_convs}
+
+
+@app.post("/api/conversations/{conversation_id}/join")
+async def join_group(conversation_id: str, user_id: str = Body(..., embed=True)):
+    """Join a group conversation"""
+    conversation = await get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if conversation.get("type") != "group":
+        raise HTTPException(status_code=400, detail="Can only join group conversations")
+
+    participants = conversation.get("participants", [])
+    if user_id in participants:
+        return {"message": "Already a member of this group", "conversation": conversation}
+
+    # Add user to participants
+    participants.append(user_id)
+    await update_conversation(conversation_id, {"participants": participants})
+
+    # Update local conversation object
+    conversation["participants"] = participants
+
+    # Broadcast join event to all group members
+    join_message = {
+        "type": "user_joined_group",
+        "conversationId": conversation_id,
+        "userId": user_id,
+        "conversation": conversation
+    }
+    await manager.broadcast_to_conversation(join_message, conversation_id)
+
+    return {"message": "Successfully joined group", "conversation": conversation}
+
+
+@app.post("/api/conversations/{conversation_id}/leave")
+async def leave_group(conversation_id: str, user_id: str = Body(..., embed=True)):
+    """Leave a group conversation"""
+    conversation = await get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if conversation.get("type") != "group":
+        raise HTTPException(status_code=400, detail="Can only leave group conversations")
+
+    participants = conversation.get("participants", [])
+    if user_id not in participants:
+        raise HTTPException(status_code=400, detail="User is not a member of this group")
+
+    # Remove user from participants
+    participants = [p for p in participants if p != user_id]
+    await update_conversation(conversation_id, {"participants": participants})
+
+    # Update local conversation object
+    conversation["participants"] = participants
+
+    # Broadcast leave event to all group members
+    leave_message = {
+        "type": "user_left_group",
+        "conversationId": conversation_id,
+        "userId": user_id,
+        "conversation": conversation
+    }
+    await manager.broadcast_to_conversation(leave_message, conversation_id)
+
+    return {"message": "Successfully left group", "conversation": conversation}
 
 
 @app.post("/api/conversations/{conversation_id}/add-bot")
@@ -387,6 +494,31 @@ async def add_bot_to_conversation(conversation_id: str):
     return {"message": "Bot added successfully", "hasBot": True}
 
 
+@app.post("/api/conversations/{conversation_id}/remove-bot")
+async def remove_bot_from_conversation(conversation_id: str):
+    """Remove AI bot from a conversation"""
+    conversation = await get_conversation(conversation_id)
+    if not conversation:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+
+    if not conversation.get("hasBot"):
+        return {"message": "Bot not in conversation", "hasBot": False}
+
+    await update_conversation(conversation_id, {"hasBot": False})
+
+    # Notify all participants
+    bot_message = {
+        "type": "bot_removed",
+        "conversationId": conversation_id,
+        "message": "AI Bot has been removed from the conversation",
+        "timestamp": datetime.utcnow().isoformat()
+    }
+
+    await manager.broadcast_to_conversation(bot_message, conversation_id)
+
+    return {"message": "Bot removed successfully", "hasBot": False}
+
+
 @app.websocket("/ws/{user_id}")
 async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """WebSocket endpoint for real-time messaging"""
@@ -405,11 +537,25 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                 if not message_text or not conversation_id:
                     continue
 
+                # Check if user is a participant in the conversation
+                conversation = await get_conversation(conversation_id)
+                if not conversation:
+                    logger.warning(f"Conversation {conversation_id} not found")
+                    continue
+
+                participants = conversation.get("participants", [])
+                if user_id not in participants:
+                    logger.warning(f"User {user_id} is not a participant in conversation {conversation_id}")
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "You are not a member of this conversation. Please join the group first."
+                    }, user_id)
+                    continue
+
                 # Check for /bot command
                 if message_text == "/bot":
                     # Add bot to conversation
-                    conversation = await get_conversation(conversation_id)
-                    if conversation and not conversation.get("hasBot"):
+                    if not conversation.get("hasBot"):
                         await update_conversation(conversation_id, {"hasBot": True})
 
                         # Send notification
@@ -417,6 +563,22 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                             "type": "bot_added",
                             "conversationId": conversation_id,
                             "message": "AI Bot has been added to the conversation",
+                            "timestamp": datetime.utcnow().isoformat()
+                        }
+                        await manager.broadcast_to_conversation(notification, conversation_id)
+                    continue
+
+                # Check for /chat command
+                if message_text == "/chat":
+                    # Remove bot from conversation
+                    if conversation.get("hasBot"):
+                        await update_conversation(conversation_id, {"hasBot": False})
+
+                        # Send notification
+                        notification = {
+                            "type": "bot_removed",
+                            "conversationId": conversation_id,
+                            "message": "AI Bot has been removed from the conversation",
                             "timestamp": datetime.utcnow().isoformat()
                         }
                         await manager.broadcast_to_conversation(notification, conversation_id)
@@ -496,6 +658,30 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                         "conversationId": conversation_id,
                         "messages": recent_messages
                     }, user_id)
+
+            elif message_type == "get_all_groups":
+                # User requesting all available groups
+                # Get all conversations from database
+                if db:
+                    convs_ref = db.collection("conversations")
+                    docs = convs_ref.stream()
+                    all_convs = [doc.to_dict() for doc in docs]
+                elif supabase_client:
+                    response = supabase_client.table("conversations").select("*").execute()
+                    all_convs = response.data
+                else:
+                    all_convs = list(conversations.values())
+
+                # Filter: return all groups, but only one-to-one conversations where user is a participant
+                filtered_convs = [
+                    conv for conv in all_convs
+                    if conv.get("type") == "group" or (conv.get("type") == "one_to_one" and user_id in conv.get("participants", []))
+                ]
+
+                await manager.send_personal_message({
+                    "type": "all_groups",
+                    "conversations": filtered_convs
+                }, user_id)
 
     except WebSocketDisconnect:
         manager.disconnect(user_id)

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/chat_service.dart';
+import '../services/notification_service.dart';
 import '../widgets/input_buttons.dart';
 
 class SimpleChatScreen extends StatefulWidget {
@@ -17,10 +18,20 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
   @override
   void initState() {
     super.initState();
+    // Update notification service to track current conversation
+    final chatService = context.read<ChatService>();
+    final notificationService = NotificationService();
+    if (chatService.currentConversationId != null) {
+      notificationService.setCurrentConversationId(chatService.currentConversationId);
+      notificationService.cancelConversationNotifications(chatService.currentConversationId!);
+    }
   }
 
   @override
   void dispose() {
+    // Clear current conversation tracking when leaving chat screen
+    final notificationService = NotificationService();
+    notificationService.setCurrentConversationId(null);
     _textController.dispose();
     _scrollController.dispose();
     super.dispose();

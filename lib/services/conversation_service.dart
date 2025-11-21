@@ -9,9 +9,11 @@ class ConversationService extends ChangeNotifier {
   static const String _baseUrl = AppConfig.backendBaseUrl;
   Conversation? _currentConversation;
   final List<Conversation> _conversations = [];
+  final Map<String, String> _usernameCache = {}; // Cache for participant usernames
 
   Conversation? get currentConversation => _currentConversation;
   List<Conversation> get conversations => _conversations;
+  Map<String, String> get usernameCache => _usernameCache;
 
   Future<Conversation> createConversation({
     String? name,
@@ -32,7 +34,16 @@ class ConversationService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final conversationData = json.decode(response.body);
         final conversation = Conversation.fromJson(conversationData);
-        _conversations.add(conversation);
+
+        // Check if conversation already exists in list
+        final exists = _conversations.any((c) => c.id == conversation.id);
+        if (!exists) {
+          _conversations.add(conversation);
+        } else {
+          // Update existing conversation
+          final index = _conversations.indexWhere((c) => c.id == conversation.id);
+          _conversations[index] = conversation;
+        }
         notifyListeners();
         return conversation;
       } else {
@@ -71,11 +82,20 @@ class ConversationService extends ChangeNotifier {
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
         final messagesList = data['messages'] as List;
-        return messagesList
+        final messages = messagesList
             .map((msg) => ChatMessage.fromJson(msg, currentUserId: null))
             .toList()
             .reversed
             .toList(); // Reverse to show oldest first
+
+        // Cache usernames from messages
+        for (final message in messages) {
+          if (message.userId != null && message.userName != null) {
+            updateUsernameCache(message.userId!, message.userName!);
+          }
+        }
+
+        return messages;
       } else {
         throw Exception('Failed to get messages: ${response.body}');
       }
@@ -116,6 +136,37 @@ class ConversationService extends ChangeNotifier {
     }
   }
 
+  Future<void> removeBotFromConversation(String conversationId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/conversations/$conversationId/remove-bot'),
+      );
+
+      if (response.statusCode == 200) {
+        // Update local conversation
+        final index = _conversations.indexWhere((c) => c.id == conversationId);
+        if (index != -1) {
+          final updated = Conversation(
+            id: _conversations[index].id,
+            name: _conversations[index].name,
+            type: _conversations[index].type,
+            participants: _conversations[index].participants,
+            createdAt: _conversations[index].createdAt,
+            hasBot: false,
+          );
+          _conversations[index] = updated;
+          if (_currentConversation?.id == conversationId) {
+            _currentConversation = updated;
+          }
+          notifyListeners();
+        }
+      }
+    } catch (e) {
+      debugPrint('Error removing bot from conversation: $e');
+      rethrow;
+    }
+  }
+
   void setCurrentConversation(Conversation? conversation) {
     _currentConversation = conversation;
     notifyListeners();
@@ -125,6 +176,109 @@ class ConversationService extends ChangeNotifier {
     _conversations.clear();
     _conversations.addAll(conversations);
     notifyListeners();
+  }
+
+  Future<List<Conversation>> getAllConversations(String userId) async {
+    try {
+      final response = await http.get(
+        Uri.parse('$_baseUrl/api/conversations?user_id=$userId'),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final conversationsList = data['conversations'] as List;
+        final conversations = conversationsList
+            .map((conv) => Conversation.fromJson(conv))
+            .toList();
+
+        // Update local list
+        _conversations.clear();
+        _conversations.addAll(conversations);
+        notifyListeners();
+
+        return conversations;
+      } else {
+        throw Exception('Failed to get conversations: ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Error getting all conversations: $e');
+      return [];
+    }
+  }
+
+  Future<Conversation> joinGroup(String conversationId, String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/conversations/$conversationId/join'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'user_id': userId}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final conversation = Conversation.fromJson(data['conversation']);
+
+        // Update local list
+        final index = _conversations.indexWhere((c) => c.id == conversationId);
+        if (index != -1) {
+          _conversations[index] = conversation;
+        } else {
+          _conversations.add(conversation);
+        }
+        notifyListeners();
+        return conversation;
+      } else {
+        throw Exception('Failed to join group: ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Error joining group: $e');
+      rethrow;
+    }
+  }
+
+  Future<Conversation> leaveGroup(String conversationId, String userId) async {
+    try {
+      final response = await http.post(
+        Uri.parse('$_baseUrl/api/conversations/$conversationId/leave'),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode({'user_id': userId}),
+      );
+
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        final conversation = Conversation.fromJson(data['conversation']);
+
+        // Update local list
+        final index = _conversations.indexWhere((c) => c.id == conversationId);
+        if (index != -1) {
+          _conversations[index] = conversation;
+        }
+        notifyListeners();
+        return conversation;
+      } else {
+        throw Exception('Failed to leave group: ${response.body}');
+      }
+    } catch (e) {
+      debugPrint('Error leaving group: $e');
+      rethrow;
+    }
+  }
+
+  void addOrUpdateConversation(Conversation conversation) {
+    final index = _conversations.indexWhere((c) => c.id == conversation.id);
+    if (index != -1) {
+      _conversations[index] = conversation;
+    } else {
+      _conversations.add(conversation);
+    }
+    notifyListeners();
+  }
+
+  void updateUsernameCache(String userId, String username) {
+    if (_usernameCache[userId] != username) {
+      _usernameCache[userId] = username;
+      notifyListeners();
+    }
   }
 }
 

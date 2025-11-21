@@ -6,9 +6,11 @@ import 'package:path_provider/path_provider.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:image_picker/image_picker.dart';
 import '../models/chat_message.dart';
+import '../models/conversation.dart';
 import 'websocket_service.dart';
 import 'conversation_service.dart';
 import 'auth_service.dart';
+import 'notification_service.dart';
 
 class ChatService extends ChangeNotifier {
   final List<ChatMessage> _messages = [];
@@ -24,6 +26,7 @@ class ChatService extends ChangeNotifier {
   WebSocketService? _webSocketService;
   ConversationService? _conversationService;
   AuthService? _authService;
+  final NotificationService _notificationService = NotificationService();
   StreamSubscription<Map<String, dynamic>>? _messageSubscription;
 
   List<ChatMessage> get messages => _messages;
@@ -72,11 +75,19 @@ class ChatService extends ChangeNotifier {
           final message = ChatMessage.fromJson(messageData, currentUserId: currentUserId);
           debugPrint('New message received: ${message.text} from ${message.userName}');
 
+          // Update username cache in conversation service if available
+          if (message.userId != null && message.userName != null && _conversationService != null) {
+            _conversationService!.updateUsernameCache(message.userId!, message.userName!);
+          }
+
           // Ignore if message is from current user (handled by message_sent)
           if (currentUserId != null && message.userId == currentUserId) {
             debugPrint('Ignoring new_message from current user (already handled by message_sent)');
             break;
           }
+
+          // Show notification for new message (if not viewing this conversation)
+          _showNotificationForMessage(message);
 
           // Check conversation ID match
           if (message.conversationId == _currentConversationId) {
@@ -111,24 +122,17 @@ class ChatService extends ChangeNotifier {
                 }
               });
             }
-            // Handle case where message is for a different conversation - try to load it
-            else if (message.conversationId != null && _conversationService != null) {
-              debugPrint('Attempting to load conversation: ${message.conversationId}');
-              // Handle async operation without blocking
-              _handleMessageForDifferentConversation(message, currentUserId).catchError((e) {
-                debugPrint('Error in async conversation loading: $e');
-                // If loading fails and no current conversation, still try to show the message
-                if (_currentConversationId == null) {
-                  debugPrint('Failed to load conversation, but no current conversation. Adding message anyway.');
-                  _currentConversationId = message.conversationId;
-                  _webSocketService?.joinConversation(message.conversationId!);
-                  final exists = _messages.any((m) => m.id == message.id);
-                  if (!exists) {
-                    _messages.add(message);
-                    notifyListeners();
-                  }
-                }
-              });
+            // Handle case where message is for a different conversation
+            // Don't automatically load/open it - just show notification
+            else if (message.conversationId != null) {
+              debugPrint('Message for different conversation: ${message.conversationId}');
+              debugPrint('Not loading conversation automatically - notification will be shown');
+              // Just ensure the conversation exists in the list, but don't open it
+              if (_conversationService != null) {
+                _ensureConversationInList(message.conversationId!, currentUserId).catchError((e) {
+                  debugPrint('Error ensuring conversation in list: $e');
+                });
+              }
             }
           }
         } catch (e) {
@@ -147,6 +151,11 @@ class ChatService extends ChangeNotifier {
           final currentUserId = _authService?.currentUser?.id;
           final message = ChatMessage.fromJson(messageData, currentUserId: currentUserId);
           debugPrint('Message sent confirmation: ${message.text}');
+
+          // Update username cache in conversation service if available
+          if (message.userId != null && message.userName != null && _conversationService != null) {
+            _conversationService!.updateUsernameCache(message.userId!, message.userName!);
+          }
 
           // Only process if this is for the current conversation
           if (message.conversationId != _currentConversationId) {
@@ -361,7 +370,85 @@ class ChatService extends ChangeNotifier {
       case 'bot_added':
         // Bot was added to conversation
         debugPrint('Bot added to conversation');
-        notifyListeners();
+        final botAddedConversationId = data['conversationId'] as String?;
+        if (botAddedConversationId == _currentConversationId && botAddedConversationId != null) {
+          // Show notification message for all participants
+          final notificationMessage = ChatMessage(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            text: '🤖 AI Bot has been added to the conversation',
+            createdAt: DateTime.now(),
+            isUser: false,
+            userId: 'system',
+            userName: 'System',
+            conversationId: botAddedConversationId,
+            isBot: false,
+          );
+          _messages.add(notificationMessage);
+          notifyListeners();
+        }
+        break;
+
+      case 'bot_removed':
+        // Bot was removed from conversation
+        debugPrint('Bot removed from conversation');
+        final botRemovedConversationId = data['conversationId'] as String?;
+        if (botRemovedConversationId == _currentConversationId && botRemovedConversationId != null) {
+          // Show notification message for all participants
+          final notificationMessage = ChatMessage(
+            id: DateTime.now().millisecondsSinceEpoch.toString(),
+            text: '💬 Normal chat mode enabled. AI Bot has been removed from the conversation',
+            createdAt: DateTime.now(),
+            isUser: false,
+            userId: 'system',
+            userName: 'System',
+            conversationId: botRemovedConversationId,
+            isBot: false,
+          );
+          _messages.add(notificationMessage);
+          notifyListeners();
+        }
+        break;
+
+      case 'group_created':
+        try {
+          final conversationData = data['conversation'];
+          if (conversationData != null && _conversationService != null) {
+            final conversation = Conversation.fromJson(conversationData);
+            _conversationService!.addOrUpdateConversation(conversation);
+            debugPrint('New group created: ${conversation.name ?? conversation.id}');
+          }
+        } catch (e) {
+          debugPrint('Error handling group_created: $e');
+        }
+        break;
+
+      case 'user_joined_group':
+      case 'user_left_group':
+        try {
+          final conversationData = data['conversation'];
+          if (conversationData != null && _conversationService != null) {
+            final conversation = Conversation.fromJson(conversationData);
+            _conversationService!.addOrUpdateConversation(conversation);
+            debugPrint('Group updated: ${conversation.name ?? conversation.id}');
+          }
+        } catch (e) {
+          debugPrint('Error handling group update: $e');
+        }
+        break;
+
+      case 'all_groups':
+        try {
+          final conversationsList = data['conversations'] as List?;
+          if (conversationsList != null && _conversationService != null) {
+            final conversations = conversationsList
+                .map((conv) => Conversation.fromJson(conv))
+                .toList();
+            _conversationService!.loadConversations(conversations);
+            debugPrint('Loaded ${conversations.length} conversations');
+          }
+        } catch (e) {
+          debugPrint('Error handling all_groups: $e');
+        }
         break;
 
       default:
@@ -372,6 +459,10 @@ class ChatService extends ChangeNotifier {
 
   Future<void> loadConversation(String conversationId) async {
     _currentConversationId = conversationId;
+    // Update notification service to track current conversation
+    _notificationService.setCurrentConversationId(conversationId);
+    // Cancel any existing notifications for this conversation
+    _notificationService.cancelConversationNotifications(conversationId);
     _messages.clear();
     _isLoadingConversation = true; // Set flag to prevent conversation_history from clearing
     _conversationHistoryReceived = false; // Reset flag
@@ -472,6 +563,12 @@ class ChatService extends ChangeNotifier {
       return;
     }
 
+    // Check for /chat command
+    if (text.trim() == '/chat') {
+      await _handleChatCommand();
+      return;
+    }
+
     final user = _authService?.currentUser;
     if (user == null || _webSocketService == null) {
       debugPrint('User not authenticated or WebSocket not connected');
@@ -529,23 +626,22 @@ class ChatService extends ChangeNotifier {
 
     try {
       await _conversationService!.addBotToConversation(_currentConversationId!);
-
-      // Show notification message
-      final notificationMessage = ChatMessage(
-        id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: '🤖 AI Bot has been added to the conversation',
-        createdAt: DateTime.now(),
-        isUser: false,
-        userId: 'system',
-        userName: 'System',
-        conversationId: _currentConversationId,
-        isBot: false,
-      );
-
-      _messages.add(notificationMessage);
-      notifyListeners();
+      // Notification message will be added via WebSocket bot_added event
+      // so all participants see it
     } catch (e) {
       debugPrint('Error adding bot: $e');
+    }
+  }
+
+  Future<void> _handleChatCommand() async {
+    if (_currentConversationId == null || _conversationService == null) return;
+
+    try {
+      await _conversationService!.removeBotFromConversation(_currentConversationId!);
+      // Notification message will be added via WebSocket bot_removed event
+      // so all participants see it
+    } catch (e) {
+      debugPrint('Error removing bot: $e');
     }
   }
 
@@ -660,8 +756,34 @@ class ChatService extends ChangeNotifier {
 
   void clearConversation() {
     _currentConversationId = null;
+    _notificationService.setCurrentConversationId(null);
     _messages.clear();
     notifyListeners();
+  }
+
+  /// Ensure conversation exists in the list without opening it
+  Future<void> _ensureConversationInList(String conversationId, String? currentUserId) async {
+    try {
+      // Check if conversation already exists in list
+      final conversations = _conversationService!.conversations;
+      final conversationExists = conversations.any((c) => c.id == conversationId);
+
+      if (!conversationExists) {
+        // Fetch the conversation to add it to the list
+        final conversation = await _conversationService!.getConversation(conversationId);
+
+        // Check if current user is a participant
+        final isParticipant = conversation.participants.contains(currentUserId);
+
+        if (isParticipant) {
+          debugPrint('Adding conversation to list: ${conversation.id}');
+          _conversationService!.loadConversations([...conversations, conversation]);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error ensuring conversation in list: $e');
+      // Don't rethrow - this is not critical
+    }
   }
 
   Future<void> _handleMessageForDifferentConversation(
@@ -711,6 +833,41 @@ class ChatService extends ChangeNotifier {
       debugPrint('Error loading conversation for received message: $e');
       rethrow; // Re-throw to be caught by caller
     }
+  }
+
+  /// Show notification for a new message
+  Future<void> _showNotificationForMessage(ChatMessage message) async {
+    debugPrint('_showNotificationForMessage called: conversationId=${message.conversationId}, userName=${message.userName}, currentConversationId=$_currentConversationId');
+
+    if (message.conversationId == null || message.userName == null) {
+      debugPrint('Skipping notification: missing conversationId or userName');
+      return;
+    }
+
+    // Get conversation name from conversation service
+    String? conversationName;
+    if (_conversationService != null) {
+      try {
+        final conversation = _conversationService!.conversations.firstWhere(
+          (c) => c.id == message.conversationId,
+        );
+        conversationName = conversation.name;
+        debugPrint('Found conversation name for notification: $conversationName');
+      } catch (e) {
+        // Conversation not found in list, use sender name as fallback
+        debugPrint('Conversation not found for notification: ${message.conversationId}, will use sender name');
+      }
+    }
+
+    // Show notification
+    debugPrint('Calling notificationService.showMessageNotification...');
+    final result = await _notificationService.showMessageNotification(
+      conversationId: message.conversationId!,
+      messageText: message.text,
+      senderName: message.userName!,
+      conversationName: conversationName,
+    );
+    debugPrint('Notification result: $result (true=shown, false=suppressed)');
   }
 
   @override

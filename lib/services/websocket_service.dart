@@ -12,6 +12,7 @@ class WebSocketService extends ChangeNotifier {
   bool _isConnected = false;
   StreamController<Map<String, dynamic>>? _messageController;
   StreamSubscription<dynamic>? _streamSubscription;
+  Future<void>? _connectingFuture; // Lock to prevent concurrent connections
 
   bool get isConnected => _isConnected;
   Stream<Map<String, dynamic>>? get messageStream => _messageController?.stream;
@@ -22,10 +23,50 @@ class WebSocketService extends ChangeNotifier {
       return; // Already connected
     }
 
+    // If a connection is already in progress, wait for it to complete
+    if (_connectingFuture != null) {
+      debugPrint('Connection already in progress, waiting...');
+      await _connectingFuture;
+      // After waiting, check if we're now connected to the right user
+      if (_isConnected && _userId == userId) {
+        return;
+      }
+    }
+
+    // Create a new connection future and store it as the lock
+    _connectingFuture = _performConnection(userId);
     try {
-      // Disconnect existing connection if any
+      await _connectingFuture;
+    } finally {
+      _connectingFuture = null;
+    }
+  }
+
+  Future<void> _performConnection(String userId) async {
+    try {
+      // Properly clean up existing connection BEFORE creating a new one
+      // Cancel subscription first
+      await _streamSubscription?.cancel();
+      _streamSubscription = null;
+
+      // Close old channel if it exists
       if (_channel != null) {
-        await disconnect();
+        try {
+          await _channel!.sink.close();
+        } catch (e) {
+          debugPrint('Error closing old channel: $e');
+        }
+        _channel = null;
+      }
+
+      // Close old message controller if it exists
+      if (_messageController != null) {
+        try {
+          await _messageController!.close();
+        } catch (e) {
+          debugPrint('Error closing old message controller: $e');
+        }
+        _messageController = null;
       }
 
       _userId = userId;
@@ -42,10 +83,7 @@ class WebSocketService extends ChangeNotifier {
       notifyListeners();
       debugPrint('WebSocket connected successfully for user: $userId');
 
-      // Cancel any existing subscription before creating a new one
-      await _streamSubscription?.cancel();
-
-      // Listen for messages
+      // Listen for messages (stream is now guaranteed to be fresh)
       _streamSubscription = _channel!.stream.listen(
         (message) {
           try {
@@ -132,6 +170,18 @@ class WebSocketService extends ChangeNotifier {
     final message = {
       'type': 'join_conversation',
       'conversationId': conversationId,
+    };
+
+    _channel!.sink.add(json.encode(message));
+  }
+
+  void requestAllGroups() {
+    if (!_isConnected || _channel == null) {
+      throw Exception('WebSocket not connected');
+    }
+
+    final message = {
+      'type': 'get_all_groups',
     };
 
     _channel!.sink.add(json.encode(message));
