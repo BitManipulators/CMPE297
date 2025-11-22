@@ -7,7 +7,7 @@ FastAPI backend server for multi-user chat with AI support.
 - Real-time messaging via WebSocket
 - One-to-one and group conversations
 - Shared AI bot (add with `/bot` command)
-- Firebase/Supabase database support (with in-memory fallback)
+- Firebase database support (with in-memory fallback)
 - REST API for conversation management
 
 ## Setup
@@ -18,14 +18,10 @@ pip install -r requirements.txt
 ```
 
 2. (Optional) Configure Firebase:
-   - Add your Firebase service account key as `serviceAccountKey.json`
-   - Uncomment Firebase initialization in `main.py`
+   - Add your Firebase service account key as `serviceAccountKey.json` in the backend directory
+   - Firebase will be automatically initialized if the key file is found
 
-3. (Optional) Configure Supabase:
-   - Set environment variables or update `main.py` with your Supabase URL and key
-   - Uncomment Supabase initialization in `main.py`
-
-4. Run the server:
+3. Run the server:
 ```bash
 python main.py
 ```
@@ -86,7 +82,6 @@ Users can add the AI bot to a conversation by typing `/bot` in the chat.
 ## Database
 
 The server supports:
-1. Firebase Firestore (primary)
-2. Supabase (fallback)
-3. In-memory storage (development)
+1. Firebase Firestore (primary) - automatically used if `serviceAccountKey.json` is present
+2. In-memory storage (fallback) - used if Firebase is not configured
 

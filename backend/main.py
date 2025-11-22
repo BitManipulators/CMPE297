@@ -13,21 +13,14 @@ from pydantic import BaseModel
 import asyncio
 import logging
 
-# Firebase imports (with Supabase fallback)
+# Firebase imports
 try:
     import firebase_admin
     from firebase_admin import credentials, firestore
     FIREBASE_AVAILABLE = True
-except ImportError:
+except ImportError as e:
     FIREBASE_AVAILABLE = False
-    print("Firebase not available, using in-memory storage")
-
-try:
-    from supabase import create_client, Client
-    SUPABASE_AVAILABLE = True
-except ImportError:
-    SUPABASE_AVAILABLE = False
-    print("Supabase not available")
+    print(f"Firebase not available, using in-memory storage. Import error: {e}")
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -44,39 +37,36 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# In-memory storage (fallback if Firebase/Supabase not configured)
+# In-memory storage (fallback if Firebase not configured)
 active_connections: Dict[str, WebSocket] = {}
 conversations: Dict[str, Dict] = {}
 messages_store: Dict[str, List[Dict]] = {}
 users: Dict[str, Dict] = {}
 
-# Firebase/Supabase initialization
+# Firebase initialization
 db = None
-supabase_client = None
 
 # Initialize Firebase if available
 if FIREBASE_AVAILABLE:
     try:
-        # Initialize Firebase Admin SDK
-        # You'll need to add your Firebase credentials file
-        # cred = credentials.Certificate("path/to/serviceAccountKey.json")
-        # firebase_admin.initialize_app(cred)
-        # db = firestore.client()
-        logger.info("Firebase initialized (commented out - add credentials)")
+        # Check if Firebase is already initialized (prevents error on reload)
+        try:
+            firebase_admin.get_app()
+            logger.info("Firebase already initialized")
+        except ValueError:
+            # Firebase not initialized yet, so initialize it
+            import os
+            # Get the directory where this script is located
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            cred_path = os.path.join(script_dir, "serviceAccountKey.json")
+            cred = credentials.Certificate(cred_path)
+            firebase_admin.initialize_app(cred)
+            logger.info("Firebase initialized successfully")
+
+        db = firestore.client()
     except Exception as e:
         logger.warning(f"Firebase initialization failed: {e}")
-
-# Initialize Supabase if available
-if SUPABASE_AVAILABLE:
-    try:
-        # Initialize Supabase client
-        # supabase_url = "your-supabase-url"
-        # supabase_key = "your-supabase-key"
-        # supabase_client = create_client(supabase_url, supabase_key)
-        logger.info("Supabase initialized (commented out - add credentials)")
-    except Exception as e:
-        logger.warning(f"Supabase initialization failed: {e}")
-
+        db = None
 
 # Pydantic models
 class User(BaseModel):
@@ -119,13 +109,10 @@ class RegisterUserRequest(BaseModel):
 
 # Database helper functions
 async def save_message(message: Dict):
-    """Save message to database (Firebase/Supabase or in-memory)"""
+    """Save message to database (Firebase or in-memory)"""
     if db:
         # Save to Firebase
         db.collection("messages").add(message)
-    elif supabase_client:
-        # Save to Supabase
-        supabase_client.table("messages").insert(message).execute()
     else:
         # In-memory storage
         conv_id = message["conversationId"]
@@ -142,10 +129,6 @@ async def get_messages(conversation_id: str, limit: int = 50) -> List[Dict]:
         messages_ref = messages_ref.order_by("createdAt", direction=firestore.Query.DESCENDING).limit(limit)
         docs = messages_ref.stream()
         return [doc.to_dict() for doc in docs]
-    elif supabase_client:
-        # Get from Supabase
-        response = supabase_client.table("messages").select("*").eq("conversationId", conversation_id).order("createdAt", desc=True).limit(limit).execute()
-        return response.data
     else:
         # In-memory storage
         return messages_store.get(conversation_id, [])
@@ -155,8 +138,6 @@ async def save_conversation(conversation: Dict):
     """Save conversation to database"""
     if db:
         db.collection("conversations").document(conversation["id"]).set(conversation)
-    elif supabase_client:
-        supabase_client.table("conversations").insert(conversation).execute()
     else:
         conversations[conversation["id"]] = conversation
 
@@ -166,9 +147,6 @@ async def get_conversation(conversation_id: str) -> Optional[Dict]:
     if db:
         doc = db.collection("conversations").document(conversation_id).get()
         return doc.to_dict() if doc.exists else None
-    elif supabase_client:
-        response = supabase_client.table("conversations").select("*").eq("id", conversation_id).execute()
-        return response.data[0] if response.data else None
     else:
         return conversations.get(conversation_id)
 
@@ -177,8 +155,6 @@ async def update_conversation(conversation_id: str, updates: Dict):
     """Update conversation in database"""
     if db:
         db.collection("conversations").document(conversation_id).update(updates)
-    elif supabase_client:
-        supabase_client.table("conversations").update(updates).eq("id", conversation_id).execute()
     else:
         if conversation_id in conversations:
             conversations[conversation_id].update(updates)
@@ -195,13 +171,6 @@ async def find_conversation_by_participants(participant_ids: List[str], conversa
         for doc in docs:
             conv = doc.to_dict()
             if conv and set(conv.get("participants", [])) == participant_set:
-                return conv
-        return None
-    elif supabase_client:
-        # Query Supabase
-        response = supabase_client.table("conversations").select("*").eq("type", conversation_type).execute()
-        for conv in response.data:
-            if set(conv.get("participants", [])) == participant_set:
                 return conv
         return None
     else:
@@ -300,8 +269,6 @@ async def register_user(request: RegisterUserRequest):
     # Save to database
     if db:
         db.collection("users").document(user_id).set(user)
-    elif supabase_client:
-        supabase_client.table("users").insert(user).execute()
     else:
         users[user_id] = user
 
@@ -314,9 +281,6 @@ async def get_user(user_id: str):
     if db:
         doc = db.collection("users").document(user_id).get()
         return doc.to_dict() if doc.exists else None
-    elif supabase_client:
-        response = supabase_client.table("users").select("*").eq("id", user_id).execute()
-        return response.data[0] if response.data else None
     else:
         return users.get(user_id)
 
@@ -382,10 +346,6 @@ async def get_all_conversations(user_id: Optional[str] = Query(None, description
         convs_ref = db.collection("conversations")
         docs = convs_ref.stream()
         all_convs = [doc.to_dict() for doc in docs]
-    elif supabase_client:
-        # Get all conversations from Supabase
-        response = supabase_client.table("conversations").select("*").execute()
-        all_convs = response.data
     else:
         # In-memory storage
         all_convs = list(conversations.values())
@@ -666,9 +626,6 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                     convs_ref = db.collection("conversations")
                     docs = convs_ref.stream()
                     all_convs = [doc.to_dict() for doc in docs]
-                elif supabase_client:
-                    response = supabase_client.table("conversations").select("*").execute()
-                    all_convs = response.data
                 else:
                     all_convs = list(conversations.values())
 
