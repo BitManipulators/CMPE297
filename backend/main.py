@@ -12,6 +12,32 @@ from datetime import datetime
 from pydantic import BaseModel
 import asyncio
 import logging
+import os
+from dotenv import load_dotenv
+
+# Configure logging first
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Load environment variables
+load_dotenv()
+
+# Gemini AI imports
+try:
+    import google.generativeai as genai
+    GEMINI_AVAILABLE = True
+    # Configure Gemini API key from environment variable
+    gemini_api_key = os.getenv("GEMINI_API_KEY")
+    if gemini_api_key:
+        genai.configure(api_key=gemini_api_key)
+        logger.info("Gemini AI configured successfully")
+    else:
+        GEMINI_AVAILABLE = False
+        logger.warning("GEMINI_API_KEY not found in environment variables. Gemini AI will not be available.")
+except ImportError as e:
+    GEMINI_AVAILABLE = False
+    gemini_api_key = None
+    logger.warning(f"Gemini AI not available. Import error: {e}")
 
 # Firebase imports
 try:
@@ -21,10 +47,6 @@ try:
 except ImportError as e:
     FIREBASE_AVAILABLE = False
     print(f"Firebase not available, using in-memory storage. Import error: {e}")
-
-# Configure logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 app = FastAPI(title="IntoTheWild Chat API")
 
@@ -183,29 +205,113 @@ async def find_conversation_by_participants(participant_ids: List[str], conversa
 
 # AI Service (shared AI for all users)
 class AIService:
-    """Shared AI service that generates responses"""
+    """Shared AI service that generates responses using Gemini AI"""
 
-    @staticmethod
-    async def generate_response(user_message: str, conversation_context: List[Dict] = None) -> str:
+    def __init__(self):
+        """Initialize the AI service with Gemini model"""
+        self.model = None
+        self.model_name = None
+        if GEMINI_AVAILABLE and gemini_api_key:
+            # Try different model names in order of preference
+            # gemini-1.5-flash is faster and more cost-effective
+            # gemini-1.5-pro is more capable but slower
+            model_names = ['gemini-2.5-flash']
+
+            for model_name in model_names:
+                try:
+                    logger.info(f"Attempting to initialize Gemini model: {model_name}")
+                    self.model = genai.GenerativeModel(model_name)
+                    self.model_name = model_name
+                    logger.info(f"Gemini AI model '{model_name}' initialized successfully")
+                    break
+                except Exception as e:
+                    logger.warning(f"Failed to initialize Gemini model '{model_name}': {e}")
+                    self.model = None
+                    continue
+
+            if not self.model:
+                logger.error("Failed to initialize any Gemini model. AI will use fallback responses.")
+
+    async def generate_response(self, user_message: str, conversation_context: List[Dict] = None) -> str:
         """
-        Generate AI response.
-        In production, this would call your AI model (Gemma 3n or other)
-        For now, returns a mock response
+        Generate AI response using Gemini AI.
+
+        Args:
+            user_message: The user's message
+            conversation_context: List of previous messages for context
+
+        Returns:
+            AI-generated response string
         """
-        # TODO: Integrate with your AI model here
-        # This could call the on-device model via API or use a server-side model
+        # If Gemini is not available, fall back to mock response
+        if not self.model:
+            logger.warning("Gemini model not available, using fallback response")
+            responses = [
+                f"I understand you said: {user_message}. Let me help you with survival guidance.",
+                "That's an interesting question about survival. Here's what I think...",
+                "Based on your message, I'd recommend considering the following survival tips...",
+                "I can help you with that! In survival situations, it's important to...",
+            ]
+            await asyncio.sleep(0.5)
+            return responses[hash(user_message) % len(responses)]
 
-        responses = [
-            f"I understand you said: {user_message}. Let me help you with survival guidance.",
-            "That's an interesting question about survival. Here's what I think...",
-            "Based on your message, I'd recommend considering the following survival tips...",
-            "I can help you with that! In survival situations, it's important to...",
-        ]
+        try:
+            # Build conversation history for context
+            prompt_parts = []
 
-        # Simulate AI processing delay
-        await asyncio.sleep(0.5)
+            # Add system context for survival guidance
+            system_prompt = """You are a helpful AI assistant specialized in survival guidance and outdoor safety.
+You provide practical, accurate, and helpful advice about survival situations, outdoor activities, and emergency preparedness.
+Keep your responses concise, clear, and actionable. Be friendly and supportive."""
+            prompt_parts.append(system_prompt)
 
-        return responses[hash(user_message) % len(responses)]
+            # Add conversation context if available
+            if conversation_context:
+                # Reverse to get chronological order (oldest first)
+                context_messages = conversation_context[::-1]
+                for msg in context_messages[-10:]:  # Use last 10 messages for context
+                    text = msg.get("text", "")
+                    is_bot = msg.get("isBot", False)
+                    if text:
+                        if is_bot:
+                            prompt_parts.append(f"Assistant: {text}")
+                        else:
+                            user_name = msg.get("userName", "User")
+                            prompt_parts.append(f"{user_name}: {text}")
+
+            # Add current user message
+            prompt_parts.append(f"User: {user_message}")
+            prompt_parts.append("Assistant:")
+
+            # Join prompt parts with newlines for better formatting
+            full_prompt = "\n".join(prompt_parts)
+
+            # Generate response using Gemini
+            # Run in executor to avoid blocking the event loop
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(full_prompt)
+            )
+
+            # Extract text from response
+            ai_response = response.text.strip() if response.text else "I'm sorry, I couldn't generate a response. Please try again."
+
+            logger.info(f"Generated AI response for message: {user_message[:50]}...")
+            return ai_response
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error generating AI response: {e}")
+
+            # Check if it's a model not found error
+            if "404" in error_msg or "not found" in error_msg.lower():
+                logger.error(f"Model '{self.model_name}' not available. Please check your API key permissions or try a different model.")
+                # Mark model as unavailable for future requests
+                self.model = None
+
+            # Fallback response on error
+            return f"I apologize, but I encountered an error processing your message. Please try again. Your message was: {user_message[:100]}"
 
 
 # WebSocket connection manager
@@ -247,7 +353,7 @@ class ConnectionManager:
 
 
 manager = ConnectionManager()
-ai_service = AIService()
+ai_service = AIService()  # Initialize with Gemini AI
 
 
 @app.get("/")
@@ -513,8 +619,11 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                     continue
 
                 # Check for /bot command
-                if message_text == "/bot":
-                    # Add bot to conversation
+                if message_text.startswith("/bot"):
+                    # Extract the query part (everything after "/bot")
+                    query_part = message_text[4:].strip()  # Remove "/bot" and any leading/trailing spaces
+
+                    # Add bot to conversation if not already added
                     if not conversation.get("hasBot"):
                         await update_conversation(conversation_id, {"hasBot": True})
 
@@ -526,7 +635,15 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                             "timestamp": datetime.utcnow().isoformat()
                         }
                         await manager.broadcast_to_conversation(notification, conversation_id)
-                    continue
+
+                    # If there's a query after "/bot", process it as a message to the bot
+                    if query_part:
+                        # Update message_text to be the query part for bot processing
+                        message_text = query_part
+                        # Continue to normal message flow below, which will trigger bot response
+                    else:
+                        # Just "/bot" with no query, so just add bot and stop
+                        continue
 
                 # Check for /chat command
                 if message_text == "/chat":

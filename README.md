@@ -77,13 +77,13 @@ The app requires the following Android permissions:
 
 ## Current Features
 
-- ✅ WhatsApp-style chat UI (custom implementation)
-- ✅ Text input with send button
-- ✅ Voice input (speech-to-text)
-- ✅ Camera and gallery image input
-- ✅ Mock response system
-- ✅ Offline-first data persistence
-- ✅ Permission handling
+- WhatsApp-style chat UI (custom implementation)
+- Text input with send button
+- Voice input (speech-to-text)
+- Camera and gallery image input
+- Mock response system
+- Offline-first data persistence
+- Permission handling
 
 ## Next Steps
 

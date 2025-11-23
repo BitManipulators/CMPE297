@@ -6,7 +6,7 @@ FastAPI backend server for multi-user chat with AI support.
 
 - Real-time messaging via WebSocket
 - One-to-one and group conversations
-- Shared AI bot (add with `/bot` command)
+- Shared AI bot powered by Google Gemini (add with `/bot` command)
 - Firebase database support (with in-memory fallback)
 - REST API for conversation management
 
@@ -17,11 +17,17 @@ FastAPI backend server for multi-user chat with AI support.
 pip install -r requirements.txt
 ```
 
-2. (Optional) Configure Firebase:
+2. Configure Gemini AI (Required for AI bot functionality):
+   - Get your Gemini API key from [Google AI Studio](https://makersuite.google.com/app/apikey)
+   - Create a `.env` file in the backend directory
+   - Add your API key: `GEMINI_API_KEY=your_api_key_here`
+   - The AI bot will use mock responses if the API key is not configured
+
+3. (Optional) Configure Firebase:
    - Add your Firebase service account key as `serviceAccountKey.json` in the backend directory
    - Firebase will be automatically initialized if the key file is found
 
-3. Run the server:
+4. Run the server:
 ```bash
 python main.py
 ```
