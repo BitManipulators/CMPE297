@@ -22,3 +22,11 @@ output "configure_kubectl" {
   description = "Command to update kubeconfig"
   value       = "aws eks update-kubeconfig --region ${var.aws_region} --name ${module.eks.cluster_name}"
 }
+
+output "ecr_flutter_app_repository_url" {
+  value = aws_ecr_repository.flutter_app.repository_url
+}
+
+output "ecr_fastapi_backend_repository_url" {
+  value = aws_ecr_repository.fastapi_backend.repository_url
+}

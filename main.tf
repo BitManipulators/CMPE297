@@ -229,3 +229,191 @@ resource "kubernetes_ingress_v1" "main_ingress" {
   # Ensure NGINX is installed before we try to create rules for it
   depends_on = [helm_release.nginx_ingress]
 }
+
+# ---------------------------------------------------------
+# 7. Create ECR container repositories
+# ---------------------------------------------------------
+resource "aws_ecr_repository" "flutter_app" {
+  name                 = "into-the-wild-web-app"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+resource "aws_ecr_repository" "fastapi_backend" {
+  name                 = "into-the-wild-backend"
+  image_tag_mutability = "MUTABLE"
+
+  image_scanning_configuration {
+    scan_on_push = true
+  }
+}
+
+# ---------------------------------------------------------
+# 8. Flutter Frontend Deployment
+# ---------------------------------------------------------
+resource "kubernetes_deployment_v1" "flutter_frontend" {
+  metadata {
+    name      = "flutter-frontend"
+    namespace = "default"
+    labels = {
+      app = "flutter-frontend"
+    }
+  }
+
+  spec {
+    # Run 2 copies for high availability (zero downtime during updates)
+    replicas = 2
+
+    selector {
+      match_labels = {
+        app = "flutter-frontend"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "flutter-frontend"
+        }
+      }
+
+      spec {
+        container {
+          name  = "flutter-web-ui"
+          # Dynamically grab the ECR URL we created earlier + the tag
+          image = "${aws_ecr_repository.flutter_app.repository_url}:v1"
+
+          # Always pull the latest version of the tag (useful for dev)
+          image_pull_policy = "Always"
+
+          port {
+            container_port = 80 # Nginx inside the container listens on 80
+          }
+
+          # (Optional) Health Check: Nginx is healthy if it serves the index
+          liveness_probe {
+            http_get {
+              path = "/"
+              port = 80
+            }
+            initial_delay_seconds = 3
+            period_seconds        = 3
+          }
+        }
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------
+# 9. Flutter Frontend Service
+# ---------------------------------------------------------
+resource "kubernetes_service_v1" "flutter_frontend" {
+  metadata {
+    # CRITICAL: This name must match what you put in the Ingress!
+    name      = "flutter-frontend"
+    namespace = "default"
+  }
+
+  spec {
+    selector = {
+      app = "flutter-frontend" # Matches the deployment labels above
+    }
+
+    port {
+      port        = 80 # Port the Service listens on
+      target_port = 80 # Port the Container listens on
+    }
+
+    type = "ClusterIP" # Internal only. Ingress exposes it to the world.
+  }
+}
+
+# ---------------------------------------------------------
+# 10. FastAPI Backend Deployment
+# ---------------------------------------------------------
+resource "kubernetes_deployment_v1" "fastapi_backend" {
+  metadata {
+    name      = "fastapi-backend"
+    namespace = "default"
+    labels = {
+      app = "fastapi-backend"
+    }
+  }
+
+  spec {
+    replicas = 1 # High Availability Not Yet Supported
+    #replicas = 2 # High Availability
+
+    selector {
+      match_labels = {
+        app = "fastapi-backend"
+      }
+    }
+
+    template {
+      metadata {
+        labels = {
+          app = "fastapi-backend"
+        }
+      }
+
+      spec {
+        container {
+          name  = "fastapi-server"
+          # Use the repository URL from the resource above
+          image = "${aws_ecr_repository.fastapi_backend.repository_url}:v1"
+          image_pull_policy = "Always"
+
+          port {
+            container_port = 8001
+          }
+
+          # Environment Variables for Google SSO (if needed)
+          env {
+            name  = "GOOGLE_CLIENT_ID"
+            value = "your-google-client-id"
+          }
+
+          # Liveness Probe (Health Check)
+          # Assumes you have a GET / or GET /health endpoint
+          liveness_probe {
+            http_get {
+              path = "/"
+              port = 8001
+            }
+            initial_delay_seconds = 5
+            period_seconds        = 10
+          }
+        }
+      }
+    }
+  }
+}
+
+# ---------------------------------------------------------
+# 11. FastAPI Backend Service
+# ---------------------------------------------------------
+resource "kubernetes_service_v1" "fastapi_backend" {
+  metadata {
+    # CRITICAL: Must match the backend service name in your Ingress
+    name      = "fastapi-backend"
+    namespace = "default"
+  }
+
+  spec {
+    selector = {
+      app = "fastapi-backend"
+    }
+
+    port {
+      port        = 8001 # Service Port (Ingress talks to this)
+      target_port = 8001 # Container Port (Uvicorn listens on this)
+    }
+
+    type = "ClusterIP" # Internal only
+  }
+}
