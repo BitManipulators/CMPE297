@@ -116,3 +116,140 @@ If you encounter issues:
 3. **Build errors**: Run `flutter clean` and `flutter pub get`
 
 4. **Dependencies issues**: Check that all packages are compatible with your Flutter version
+
+## Deployment Guide: Flutter Web + FastAPI on AWS EKS
+
+Architecture Overview
+
+    Infrastructure: AWS EKS (managed via Terraform).
+
+    Ingress: NGINX Ingress Controller + AWS Network Load Balancer (NLB).
+
+    DNS & SSL: Cloudflare (managing DNS + SSL) → AWS NLB.
+
+    Frontend: Flutter Web (served via Nginx container).
+
+    Backend: FastAPI (Python).
+
+    Registry: AWS ECR (Elastic Container Registry).
+
+Prerequisites
+
+    AWS CLI installed and configured (aws configure).
+
+    Terraform installed.
+
+    Docker installed and running.
+
+    Kubectl installed.
+
+    Domain Name: Purchased (e.g., Namecheap) and added to Cloudflare.
+
+### Phase 1: Infrastructure (Terraform)
+
+Initialize terraform
+```
+terraform init
+```
+
+Create terraform.tfvars
+```
+aws_region   = "us-west-2"  # or your preferred region
+cluster_name = "eks-into-the-wild"
+vpc_cidr     = "10.0.0.0/16"
+
+node_instance_types = ["t3.medium"]
+node_desired_size   = 1
+node_min_size       = 1
+node_max_size       = 3
+
+# Cloudflare Origin Certificate (SSL/TLS > Origin Server)
+tls_crt = <<EOT
+-----BEGIN CERTIFICATE-----
+... paste your cloudflare cert here ...
+-----END CERTIFICATE-----
+EOT
+
+tls_key = <<EOT
+-----BEGIN PRIVATE KEY-----
+... paste your cloudflare key here ...
+-----END PRIVATE KEY-----
+EOT
+```
+
+Apply infrastructure
+```
+terraform apply
+# Type 'yes' to confirm
+```
+
+Get the Load Balancer URL
+```
+kubectl get svc -n ingress-nginx
+```
+
+Update Cloudflare DNS:
+
+    Log in to Cloudflare.
+
+    Create a CNAME record for @ (root) pointing to the AWS Address.
+
+    Create a CNAME record for www pointing to the AWS Address.
+
+    Important: Ensure the "Proxy Status" is Proxied (Orange Cloud).
+
+    SSL Mode: Set SSL/TLS to Full (Strict).
+
+### Phase 2: Build & Deploy Applications
+
+Login to AWS ECR
+
+```
+aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin <YOUR-ACCOUNT-ID>.dkr.ecr.us-west-2.amazonaws.com
+```
+
+Deploy Backend
+
+```
+# Variables
+export ACCOUNT_ID=123456789012 # Replace with your ID
+export REGION=us-west-2        # Replace with your region
+export REPO_URL=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/fastapi-backend
+
+# Build
+docker build -t $REPO_URL:v1 .
+
+# Push
+docker push $REPO_URL:v1
+```
+
+Deploy Frontend (Flutter)
+
+```
+# Variables
+export REPO_URL=$ACCOUNT_ID.dkr.ecr.$REGION.amazonaws.com/flutter-web-app
+export BACKEND_BASE_URL=https://iotsmarthome.org/api
+export WEBSOCKET_BASE_URL=wss://iotsmarthome.org/api
+
+# Build (Injects the URL into the JS bundle)
+docker build \
+  --build-arg BACKEND_BASE_URL_ARG=$BACKEND_BASE_URL \
+  --build-arg WEBSOCKET_BASE_URL_ARG=$WEBSOCKET_BASE_URL \
+  -t $REPO_URL:v1 .
+
+# Push
+docker push $REPO_URL:v1
+```
+
+Verification
+
+Check ingress-nginx logs
+```
+kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx -f
+```
+
+Check running pods
+```
+kubectl get pods
+# Should show 2/2 running for both frontend and backend
+```
