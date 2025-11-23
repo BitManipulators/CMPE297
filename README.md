@@ -4,12 +4,12 @@ A Flutter mobile chat application for survival guidance and plant recognition wi
 
 ## Features
 
-- 📱 WhatsApp-style chat UI using custom implementation
-- 🎙️ Voice input with speech-to-text
-- 📷 Camera and gallery image input
-- 💬 Text messaging with mock responses
-- 🔄 Offline-first data persistence
-- 🌿 Ready for AI integration (Gemma 3N + RAG)
+- WhatsApp-style chat UI using custom implementation
+- Voice input with speech-to-text
+- Camera and gallery image input
+- Text messaging with mock responses
+- Offline-first data persistence
+- Ready for AI integration (Gemma 3N + RAG)
 
 ## Prerequisites
 
