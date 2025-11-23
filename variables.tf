@@ -38,3 +38,15 @@ variable "node_max_size" {
   type        = number
   default     = 3
 }
+
+variable "tls_crt" {
+  description = "The full content of the Cloudflare Origin Certificate"
+  type        = string
+  sensitive   = true
+}
+
+variable "tls_key" {
+  description = "The full content of the Cloudflare Private Key"
+  type        = string
+  sensitive   = true
+}
