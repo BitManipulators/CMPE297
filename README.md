@@ -119,7 +119,7 @@ If you encounter issues:
 
 ## Deployment Guide: Flutter Web + FastAPI on AWS EKS
 
-Architecture Overview
+**Architecture Overview**
 
     Infrastructure: AWS EKS (managed via Terraform).
 
@@ -133,7 +133,7 @@ Architecture Overview
 
     Registry: AWS ECR (Elastic Container Registry).
 
-Prerequisites
+**Prerequisites**
 
     AWS CLI installed and configured (aws configure).
 
@@ -147,12 +147,12 @@ Prerequisites
 
 ### Phase 1: Infrastructure (Terraform)
 
-Initialize terraform
+1. Initialize terraform
 ```
 terraform init
 ```
 
-Create terraform.tfvars
+2. Create terraform.tfvars
 ```
 aws_region   = "us-west-2"  # or your preferred region
 cluster_name = "eks-into-the-wild"
@@ -177,18 +177,18 @@ tls_key = <<EOT
 EOT
 ```
 
-Apply infrastructure
+3. Apply infrastructure
 ```
 terraform apply
 # Type 'yes' to confirm
 ```
 
-Get the Load Balancer URL
+4. Get the Load Balancer URL
 ```
 kubectl get svc -n ingress-nginx
 ```
 
-Update Cloudflare DNS:
+5. Update Cloudflare DNS:
 
     Log in to Cloudflare.
 
@@ -202,13 +202,13 @@ Update Cloudflare DNS:
 
 ### Phase 2: Build & Deploy Applications
 
-Login to AWS ECR
+1. Login to AWS ECR
 
 ```
 aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin <YOUR-ACCOUNT-ID>.dkr.ecr.us-west-2.amazonaws.com
 ```
 
-Deploy Backend
+2. Deploy Backend
 
 ```
 # Variables
@@ -223,7 +223,7 @@ docker build -t $REPO_URL:v1 .
 docker push $REPO_URL:v1
 ```
 
-Deploy Frontend (Flutter)
+3. Deploy Frontend (Flutter)
 
 ```
 # Variables
@@ -241,7 +241,7 @@ docker build \
 docker push $REPO_URL:v1
 ```
 
-Verification
+### Phase 3: Verification
 
 Check ingress-nginx logs
 ```
@@ -251,5 +251,5 @@ kubectl logs -n ingress-nginx -l app.kubernetes.io/name=ingress-nginx -f
 Check running pods
 ```
 kubectl get pods
-# Should show 2/2 running for both frontend and backend
+# Should show 2/2 running for frontend and 1/1 for backend
 ```
