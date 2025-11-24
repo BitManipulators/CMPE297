@@ -39,7 +39,8 @@ A Flutter mobile chat application for survival guidance and plant recognition wi
 
 4. **Run the app**:
    ```bash
-   flutter run
+   flutter run -d chrome --web-port=65103
+   flutter run -d chrome --web-port=65107
    ```
 
 ### Backend Setup
