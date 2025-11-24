@@ -13,6 +13,7 @@ from pydantic import BaseModel
 import asyncio
 import logging
 import os
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Configure logging first
@@ -47,6 +48,18 @@ try:
 except ImportError as e:
     FIREBASE_AVAILABLE = False
     print(f"Firebase not available, using in-memory storage. Import error: {e}")
+
+# RAG Service imports
+try:
+    import sys
+    # Add rag directory to path
+    rag_dir = Path(__file__).parent / "rag"
+    sys.path.insert(0, str(rag_dir))
+    from rag_service import RAGService
+    RAG_AVAILABLE = True
+except ImportError as e:
+    RAG_AVAILABLE = False
+    logger.warning(f"RAG service not available. Import error: {e}")
 
 app = FastAPI(title="IntoTheWild Chat API")
 
@@ -203,14 +216,31 @@ async def find_conversation_by_participants(participant_ids: List[str], conversa
         return None
 
 
+# Initialize RAG Service
+rag_service = None
+if RAG_AVAILABLE:
+    try:
+        # Get the path to the plant data JSON file
+        script_dir = Path(__file__).parent
+        json_file_path = script_dir / "rag" / "all_plants_streaming.json"
+        rag_service = RAGService(json_file_path=str(json_file_path) if json_file_path.exists() else None)
+        if rag_service.is_available():
+            logger.info("RAG service initialized successfully")
+        else:
+            logger.warning("RAG service initialized but not fully available (missing API keys)")
+    except Exception as e:
+        logger.error(f"Failed to initialize RAG service: {e}")
+        rag_service = None
+
 # AI Service (shared AI for all users)
 class AIService:
-    """Shared AI service that generates responses using Gemini AI"""
+    """Shared AI service that generates responses using Gemini AI with RAG support"""
 
     def __init__(self):
         """Initialize the AI service with Gemini model"""
         self.model = None
         self.model_name = None
+        self.rag_service = rag_service
         if GEMINI_AVAILABLE and gemini_api_key:
             # Try different model names in order of preference
             # gemini-1.5-flash is faster and more cost-effective
@@ -259,11 +289,34 @@ class AIService:
             # Build conversation history for context
             prompt_parts = []
 
-            # Add system context for survival guidance
-            system_prompt = """You are a helpful AI assistant specialized in survival guidance and outdoor safety.
-You provide practical, accurate, and helpful advice about survival situations, outdoor activities, and emergency preparedness.
-Keep your responses concise, clear, and actionable. Be friendly and supportive."""
+            # Add system context for plant identification and information
+            system_prompt = """You are a helpful AI assistant specialized in plant identification, edibility, medicinal uses, and outdoor plant knowledge.
+Your primary role is to help users learn about plants they find in the wild, including:
+- Identifying plants by their characteristics
+- Determining if plants are edible or poisonous
+- Explaining medicinal uses and traditional applications
+- Providing safety warnings about toxic plants
+- Sharing information about plant habitats, growth patterns, and uses
+
+IMPORTANT SAFETY GUIDELINES:
+- Always emphasize that users should NEVER consume plants without 100% certainty of identification
+- Warn about lookalike plants that might be toxic
+- Recommend consulting with local experts or field guides
+- When in doubt, advise users to err on the side of caution
+
+Keep your responses accurate, informative, and safety-focused. Be friendly and educational."""
             prompt_parts.append(system_prompt)
+
+            # Get RAG context if available
+            rag_context = ""
+            if self.rag_service and self.rag_service.is_available():
+                try:
+                    rag_context = self.rag_service.get_rag_context(user_message, top_k=3)
+                    if rag_context:
+                        prompt_parts.append("\n" + rag_context)
+                        prompt_parts.append("\nUse the above plant information to answer the user's question. If the information is relevant, cite it. If not, you can provide general guidance but mention that specific information about that plant may not be in the knowledge base.")
+                except Exception as e:
+                    logger.error(f"Error getting RAG context: {e}")
 
             # Add conversation context if available
             if conversation_context:
@@ -360,6 +413,102 @@ ai_service = AIService()  # Initialize with Gemini AI
 async def root():
     return {"message": "IntoTheWild Chat API", "status": "running"}
 
+
+@app.post("/api/rag/index-plants")
+async def index_plants():
+    """Index plant data from JSON into Pinecone vector database"""
+    if not RAG_AVAILABLE or not rag_service:
+        raise HTTPException(status_code=503, detail="RAG service not available")
+
+    if not rag_service.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="RAG service not fully configured. Please set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and PINECONE_API_KEY environment variables."
+        )
+
+    try:
+        # Get the path to the plant data JSON file
+        script_dir = Path(__file__).parent
+        json_file_path = script_dir / "rag" / "all_plants_streaming.json"
+
+        if not json_file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Plant data file not found: {json_file_path}")
+
+        logger.info("Starting plant indexing process...")
+        success = rag_service.load_and_index_plants(str(json_file_path))
+
+        if success:
+            return {
+                "message": "Plants indexed successfully",
+                "status": "success",
+                "plants_cached": len(rag_service.plant_cache)
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to index plants. Check logs for details.")
+
+    except Exception as e:
+        logger.error(f"Error indexing plants: {e}")
+        raise HTTPException(status_code=500, detail=f"Error indexing plants: {str(e)}")
+
+
+@app.get("/api/rag/status")
+async def rag_status():
+    """Get RAG service status"""
+    if not RAG_AVAILABLE or not rag_service:
+        return {
+            "available": False,
+            "message": "RAG service not available"
+        }
+
+    return {
+        "available": rag_service.is_available(),
+        "index_name": rag_service.index_name if rag_service else None,
+        "plants_cached": len(rag_service.plant_cache) if rag_service else 0,
+        "message": "RAG service is ready" if rag_service.is_available() else "RAG service not fully configured"
+    }
+
+@app.get("/api/rag/test")
+async def test_rag():
+    """Test RAG service connectivity"""
+    results = {
+        "bedrock": {
+            "available": False,
+            "model": None,
+            "test_embedding": None
+        },
+        "pinecone": {
+            "available": False,
+            "index_name": None,
+            "vector_count": None
+        }
+    }
+
+    # Test Bedrock
+    if rag_service and rag_service.bedrock_runtime:
+        try:
+            test_embedding = rag_service._generate_embedding("test", input_type="search_query")
+            results["bedrock"] = {
+                "available": True,
+                "model": rag_service.embedding_model,
+                "test_embedding": f"Generated ({len(test_embedding)} dimensions)" if test_embedding else "Failed"
+            }
+        except Exception as e:
+            results["bedrock"]["error"] = str(e)
+
+    # Test Pinecone
+    if rag_service and rag_service.index:
+        try:
+            stats = rag_service.index.describe_index_stats()
+            results["pinecone"] = {
+                "available": True,
+                "index_name": rag_service.index_name,
+                "vector_count": stats.total_vector_count,
+                "dimension": stats.dimension
+            }
+        except Exception as e:
+            results["pinecone"]["error"] = str(e)
+
+    return results
 
 @app.post("/api/users/register")
 async def register_user(request: RegisterUserRequest):
