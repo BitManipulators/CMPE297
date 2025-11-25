@@ -16,5 +16,17 @@ class WebNotificationHelper {
   static Future<String> requestPermission() async {
     return 'denied';
   }
+
+  static void updateBadge(int count) {
+    // No-op for non-web platforms
+  }
+
+  static void updateDocumentTitle(int count, String originalTitle) {
+    // No-op for non-web platforms
+  }
+
+  static String? getDocumentTitle() {
+    return null;
+  }
 }
 

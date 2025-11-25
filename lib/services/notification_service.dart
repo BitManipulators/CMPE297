@@ -9,7 +9,7 @@ import 'notification_service_web_stub.dart'
 
 /// Service to handle local notifications for new messages
 /// Uses browser Notification API for web, flutter_local_notifications for mobile
-class NotificationService {
+class NotificationService extends ChangeNotifier {
   static final NotificationService _instance = NotificationService._internal();
   factory NotificationService() => _instance;
   NotificationService._internal();
@@ -19,6 +19,10 @@ class NotificationService {
   String? _currentConversationId; // Track which conversation is currently being viewed
   final StreamController<NotificationResponse> _notificationResponseController =
       StreamController<NotificationResponse>.broadcast();
+
+  // Track unread message counts per conversation
+  final Map<String, int> _unreadCounts = {};
+  String _originalTitle = 'IntoTheWild'; // Store original app title
 
   /// Initialize the notification service
   Future<void> initialize() async {
@@ -32,6 +36,8 @@ class NotificationService {
     if (kIsWeb) {
       // For web, use browser's native Notification API
       await _initializeWebNotifications();
+      // Store original title
+      _originalTitle = web.WebNotificationHelper.getDocumentTitle() ?? 'IntoTheWild';
     } else {
       // For mobile, use flutter_local_notifications
       await _initializeMobileNotifications();
@@ -136,6 +142,58 @@ class NotificationService {
   /// Set the current conversation ID (to avoid showing notifications for the active conversation)
   void setCurrentConversationId(String? conversationId) {
     _currentConversationId = conversationId;
+
+    // Clear unread count for the conversation being viewed
+    if (conversationId != null) {
+      _clearUnreadCount(conversationId);
+    }
+  }
+
+  /// Get total unread message count across all conversations
+  int getTotalUnreadCount() {
+    return _unreadCounts.values.fold(0, (sum, count) => sum + count);
+  }
+
+  /// Get unread count for a specific conversation
+  int getUnreadCount(String conversationId) {
+    return _unreadCounts[conversationId] ?? 0;
+  }
+
+  /// Clear unread count for a specific conversation
+  void _clearUnreadCount(String conversationId) {
+    if (_unreadCounts.containsKey(conversationId) && _unreadCounts[conversationId]! > 0) {
+      _unreadCounts[conversationId] = 0;
+      _updateBadge();
+      notifyListeners();
+    }
+  }
+
+  /// Increment unread count for a conversation
+  void _incrementUnreadCount(String conversationId) {
+    _unreadCounts[conversationId] = (_unreadCounts[conversationId] ?? 0) + 1;
+    _updateBadge();
+    notifyListeners();
+  }
+
+  /// Update badge count (web) and document title
+  void _updateBadge() {
+    if (kIsWeb) {
+      final totalCount = getTotalUnreadCount();
+      web.WebNotificationHelper.updateBadge(totalCount);
+      _updateDocumentTitle(totalCount);
+    }
+  }
+
+  /// Update document title with unread count
+  void _updateDocumentTitle(int count) {
+    if (kIsWeb) {
+      try {
+        // Use dart:html if available, otherwise use JS interop
+        web.WebNotificationHelper.updateDocumentTitle(count, _originalTitle);
+      } catch (e) {
+        debugPrint('Error updating document title: $e');
+      }
+    }
   }
 
   /// Show a notification for a new message
@@ -193,6 +251,9 @@ class NotificationService {
     final body = messageText.length > 100
         ? '${messageText.substring(0, 100)}...'
         : messageText;
+
+    // Increment unread count for this conversation
+    _incrementUnreadCount(conversationId);
 
     // Show notification based on platform
     if (kIsWeb) {
@@ -294,9 +355,21 @@ class NotificationService {
     return _notificationResponseController.stream;
   }
 
+  /// Clear all unread counts (e.g., when user logs out)
+  void clearAllUnreadCounts() {
+    _unreadCounts.clear();
+    _updateBadge();
+    notifyListeners();
+  }
+
   /// Dispose the service
   void dispose() {
     _notificationResponseController.close();
+    // Clear badge on dispose
+    if (kIsWeb) {
+      web.WebNotificationHelper.updateBadge(0);
+      web.WebNotificationHelper.updateDocumentTitle(0, _originalTitle);
+    }
   }
 }
 
