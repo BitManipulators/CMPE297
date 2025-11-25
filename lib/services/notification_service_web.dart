@@ -1,6 +1,7 @@
 // Web-specific notification implementation
 import 'dart:async';
 import 'dart:js' as js;
+import 'dart:js_util' as js_util;
 
 class WebNotificationHelper {
   /// Show a browser notification
@@ -104,6 +105,57 @@ class WebNotificationHelper {
       // Ignore
     }
     return 'denied';
+  }
+
+  /// Update badge count using Badge API (shows count on app icon)
+  static void updateBadge(int count) {
+    try {
+      // Use eval to safely call Badge API (Chrome, Edge, Opera support)
+      // This avoids issues with JavaScript interop for newer APIs
+      if (count > 0) {
+        // Show badge with count
+        js.context.callMethod('eval', [
+          'if (navigator.setAppBadge) { navigator.setAppBadge($count).catch(() => {}); }'
+        ]);
+      } else {
+        // Clear badge
+        js.context.callMethod('eval', [
+          'if (navigator.clearAppBadge) { navigator.clearAppBadge().catch(() => {}); }'
+        ]);
+      }
+    } catch (e) {
+      // Badge API not supported or error occurred
+      // This is fine, not all browsers support it
+    }
+  }
+
+  /// Update document title with unread count (like WhatsApp)
+  static void updateDocumentTitle(int count, String originalTitle) {
+    try {
+      final document = js.context['document'];
+      if (document != null) {
+        if (count > 0) {
+          document['title'] = '($count) $originalTitle';
+        } else {
+          document['title'] = originalTitle;
+        }
+      }
+    } catch (e) {
+      // Error updating title
+    }
+  }
+
+  /// Get current document title
+  static String? getDocumentTitle() {
+    try {
+      final document = js.context['document'];
+      if (document != null) {
+        return document['title'] as String?;
+      }
+    } catch (e) {
+      // Error getting title
+    }
+    return null;
   }
 }
 

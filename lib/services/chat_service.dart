@@ -105,28 +105,11 @@ class ChatService extends ChangeNotifier {
             debugPrint('Current conversation ID: $_currentConversationId');
             debugPrint('Message conversation ID: ${message.conversationId}');
 
-            // Handle case where there's no current conversation - load the conversation and add the message
-            if (_currentConversationId == null && message.conversationId != null) {
-              debugPrint('No current conversation set. Loading conversation and adding message.');
-              // Try to load the conversation first, then add the message
-              _handleMessageForDifferentConversation(message, currentUserId).catchError((e) {
-                debugPrint('Error loading conversation for received message: $e');
-                // If loading fails, at least set the conversation ID and add the message
-                _currentConversationId = message.conversationId;
-                _webSocketService?.joinConversation(message.conversationId!);
-                final exists = _messages.any((m) => m.id == message.id);
-                if (!exists) {
-                  _messages.add(message);
-                  notifyListeners();
-                  debugPrint('Message added (conversation load failed): ${message.text}');
-                }
-              });
-            }
-            // Handle case where message is for a different conversation
-            // Don't automatically load/open it - just show notification
-            else if (message.conversationId != null) {
+            // Don't automatically open conversations - just ensure it exists in the list and show notification
+            // The unread count will be tracked by NotificationService
+            if (message.conversationId != null) {
               debugPrint('Message for different conversation: ${message.conversationId}');
-              debugPrint('Not loading conversation automatically - notification will be shown');
+              debugPrint('Not loading conversation automatically - notification will be shown and unread count updated');
               // Just ensure the conversation exists in the list, but don't open it
               if (_conversationService != null) {
                 _ensureConversationInList(message.conversationId!, currentUserId).catchError((e) {

@@ -137,53 +137,82 @@ class _ConversationListScreenState extends State<ConversationListScreen> {
 
             final isSelected = conversationService.currentConversation?.id == conversation.id;
 
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-              selected: isWideLayout && isSelected,
-              selectedTileColor: const Color(0xFFE8F5E9),
-              leading: CircleAvatar(
-                backgroundColor: const Color(0xFF2E7D32),
-                child: conversation.type == 'one_to_one'
-                    ? const Icon(Icons.person, color: Colors.white)
-                    : const Icon(Icons.group, color: Colors.white),
-              ),
-              title: Text(
-                _getConversationDisplayName(conversation, user.id),
-                overflow: TextOverflow.ellipsis,
-              ),
-              subtitle: Text(
-                '${conversation.participants.length} participants${conversation.hasBot ? ' • AI Bot' : ''}',
-              ),
-              trailing: isGroup
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        if (conversation.hasBot)
-                          const Icon(Icons.smart_toy, color: Color(0xFF2E7D32)),
-                        const SizedBox(width: 8),
-                        if (isParticipant)
-                          IconButton(
-                            icon: const Icon(Icons.exit_to_app, color: Colors.red),
-                            onPressed: () => _leaveGroup(conversation),
-                            tooltip: 'Leave group',
-                          )
-                        else
-                          ElevatedButton.icon(
-                            onPressed: () => _joinGroup(conversation),
-                            icon: const Icon(Icons.person_add, size: 16),
-                            label: const Text('Join'),
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFF2E7D32),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            return Consumer<NotificationService>(
+              builder: (context, notificationService, child) {
+                final unreadCount = notificationService.getUnreadCount(conversation.id);
+
+                return ListTile(
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+                  selected: isWideLayout && isSelected,
+                  selectedTileColor: const Color(0xFFE8F5E9),
+                  leading: CircleAvatar(
+                    backgroundColor: const Color(0xFF2E7D32),
+                    child: conversation.type == 'one_to_one'
+                        ? const Icon(Icons.person, color: Colors.white)
+                        : const Icon(Icons.group, color: Colors.white),
+                  ),
+                  title: Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          _getConversationDisplayName(conversation, user.id),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (unreadCount > 0)
+                        Container(
+                          margin: const EdgeInsets.only(left: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.red,
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          child: Text(
+                            unreadCount > 99 ? '99+' : unreadCount.toString(),
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
                             ),
                           ),
-                      ],
-                    )
-                  : (conversation.hasBot ? const Icon(Icons.smart_toy, color: Color(0xFF2E7D32)) : null),
-              onTap: isGroup && !isParticipant
-                  ? () => _joinGroup(conversation)
-                  : () => _openConversation(conversation, stayOnScreen: isWideLayout),
+                        ),
+                    ],
+                  ),
+                  subtitle: Text(
+                    '${conversation.participants.length} participants${conversation.hasBot ? ' • AI Bot' : ''}',
+                  ),
+                  trailing: isGroup
+                      ? Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (conversation.hasBot)
+                              const Icon(Icons.smart_toy, color: Color(0xFF2E7D32)),
+                            const SizedBox(width: 8),
+                            if (isParticipant)
+                              IconButton(
+                                icon: const Icon(Icons.exit_to_app, color: Colors.red),
+                                onPressed: () => _leaveGroup(conversation),
+                                tooltip: 'Leave group',
+                              )
+                            else
+                              ElevatedButton.icon(
+                                onPressed: () => _joinGroup(conversation),
+                                icon: const Icon(Icons.person_add, size: 16),
+                                label: const Text('Join'),
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2E7D32),
+                                  foregroundColor: Colors.white,
+                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                ),
+                              ),
+                          ],
+                        )
+                      : (conversation.hasBot ? const Icon(Icons.smart_toy, color: Color(0xFF2E7D32)) : null),
+                  onTap: isGroup && !isParticipant
+                      ? () => _joinGroup(conversation)
+                      : () => _openConversation(conversation, stayOnScreen: isWideLayout),
+                );
+              },
             );
           },
         );
@@ -726,11 +755,12 @@ class _ConversationListScreenState extends State<ConversationListScreen> {
   void _openConversation(Conversation conversation, {bool stayOnScreen = false}) {
     final chatService = context.read<ChatService>();
     final conversationService = context.read<ConversationService>();
-    final notificationService = NotificationService();
+    final notificationService = context.read<NotificationService>();
 
     conversationService.setCurrentConversation(conversation);
     chatService.loadConversation(conversation.id);
     // Update notification service to track current conversation
+    // This will also clear the unread count for this conversation
     notificationService.setCurrentConversationId(conversation.id);
     // Cancel any notifications for this conversation
     notificationService.cancelConversationNotifications(conversation.id);
