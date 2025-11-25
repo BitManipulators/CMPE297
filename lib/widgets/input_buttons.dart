@@ -107,19 +107,15 @@ class InputButtons extends StatelessWidget {
     BuildContext context,
     ChatService chatService,
   ) async {
-    final imagePath = await chatService.pickImageFromCamera();
-    if (imagePath != null) {
-      await chatService.sendImageMessage(imagePath);
-    }
+    // Image is already sent in pickImageFromCamera
+    await chatService.pickImageFromCamera();
   }
 
   Future<void> _handleGalleryInput(
     BuildContext context,
     ChatService chatService,
   ) async {
-    final imagePath = await chatService.pickImageFromGallery();
-    if (imagePath != null) {
-      await chatService.sendImageMessage(imagePath);
-    }
+    // Image is already sent in pickImageFromGallery
+    await chatService.pickImageFromGallery();
   }
 }

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
+import 'dart:io' if (dart.library.html) 'dart:html' as io;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:speech_to_text/speech_to_text.dart';
@@ -199,14 +200,17 @@ class ChatService extends ChangeNotifier {
 
           if (index != -1) {
             // Replace optimistic message with server-confirmed message
-            // Preserve clientMessageId if it exists in the original message
+            // Preserve clientMessageId and imageUrl from the original optimistic message
             final originalClientId = _messages[index].clientMessageId;
+            final originalImageUrl = _messages[index].imageUrl;
             final updatedMessage = ChatMessage(
               id: message.id,
               text: message.text,
               createdAt: message.createdAt,
               isUser: message.isUser,
-              imageUrl: message.imageUrl,
+              // Preserve original imageUrl (local file path) if it exists, otherwise use server's imageUrl
+              // Server sends truncated data URL which is not useful for display
+              imageUrl: originalImageUrl ?? message.imageUrl,
               type: message.type,
               userId: message.userId,
               userName: message.userName,
@@ -628,48 +632,16 @@ class ChatService extends ChangeNotifier {
     }
   }
 
+  // Legacy method - kept for backward compatibility
+  // Prefer using sendImageMessageFromXFile directly
   Future<void> sendImageMessage(String imagePath) async {
-    if (_currentConversationId == null) return;
-
-    final user = _authService?.currentUser;
-    if (user == null || _webSocketService == null) {
-      debugPrint('User not authenticated or WebSocket not connected');
-      return;
-    }
-
-    // For now, send as text message with image path
-    // In production, you'd upload the image first and send the URL
-    final imageMessage = ChatMessage(
-      id: DateTime.now().millisecondsSinceEpoch.toString(),
-      text: "📷 Image shared",
-      createdAt: DateTime.now(),
-      isUser: true,
-      imageUrl: imagePath,
-      type: MessageType.image,
-      userId: user.id,
-      userName: user.username,
-      conversationId: _currentConversationId,
-      isBot: false,
-    );
-
-    _messages.add(imageMessage);
-    notifyListeners();
-
-    // Send via WebSocket
+    // This method is deprecated - use XFile.readAsBytes() directly
+    // For now, try to create XFile from path (may not work on web)
     try {
-      if (!_webSocketService!.isConnected) {
-        debugPrint('WebSocket not connected. Attempting to reconnect...');
-        await _webSocketService!.connect(user.id);
-      }
-
-      _webSocketService!.sendMessage(
-        text: "📷 Image shared",
-        conversationId: _currentConversationId!,
-        userName: user.username,
-        userId: user.id,
-      );
+      final xFile = XFile(imagePath);
+      await sendImageMessageFromXFile(xFile);
     } catch (e) {
-      debugPrint('Error sending image message: $e');
+      debugPrint('Error in sendImageMessage: $e. Please use pickImageFromCamera/Gallery instead.');
     }
   }
 
@@ -712,7 +684,12 @@ class ChatService extends ChangeNotifier {
         source: ImageSource.camera,
         imageQuality: 80,
       );
-      return image?.path;
+      if (image != null) {
+        // Read bytes directly from XFile (works on all platforms)
+        await sendImageMessageFromXFile(image);
+        return image.path; // Return path for UI display
+      }
+      return null;
     } catch (e) {
       debugPrint('Error picking image from camera: $e');
       return null;
@@ -725,10 +702,96 @@ class ChatService extends ChangeNotifier {
         source: ImageSource.gallery,
         imageQuality: 80,
       );
-      return image?.path;
+      if (image != null) {
+        // Read bytes directly from XFile (works on all platforms)
+        await sendImageMessageFromXFile(image);
+        return image.path; // Return path for UI display
+      }
+      return null;
     } catch (e) {
       debugPrint('Error picking image from gallery: $e');
       return null;
+    }
+  }
+
+  Future<void> sendImageMessageFromXFile(XFile imageFile) async {
+    if (_currentConversationId == null) return;
+
+    final user = _authService?.currentUser;
+    if (user == null || _webSocketService == null) {
+      debugPrint('User not authenticated or WebSocket not connected');
+      return;
+    }
+
+    // Generate clientMessageId for matching optimistic message with server response
+    final clientMessageId = DateTime.now().millisecondsSinceEpoch.toString() + '_' + user.id.substring(0, 8);
+
+    ChatMessage? imageMessage; // Declare outside try block for error handling
+
+    try {
+      // Read image bytes directly from XFile (works on all platforms)
+      final imageBytes = await imageFile.readAsBytes();
+
+      // Determine MIME type from file extension or name
+      String mimeType = 'image/jpeg';
+      final path = imageFile.path.toLowerCase();
+      final name = imageFile.name.toLowerCase();
+
+      if (path.endsWith('.png') || name.endsWith('.png')) {
+        mimeType = 'image/png';
+      } else if (path.endsWith('.webp') || name.endsWith('.webp')) {
+        mimeType = 'image/webp';
+      } else if (path.endsWith('.gif') || name.endsWith('.gif')) {
+        mimeType = 'image/gif';
+      }
+
+      // Convert to base64
+      final imageBase64 = base64Encode(imageBytes);
+
+      // Create data URL for display (works with Image.network)
+      final dataUrl = 'data:$mimeType;base64,$imageBase64';
+
+      // Create optimistic message with clientMessageId and data URL for display
+      imageMessage = ChatMessage(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        text: "📷 Plant image",
+        createdAt: DateTime.now(),
+        isUser: true,
+        imageUrl: dataUrl, // Use data URL so it works with Image.network()
+        type: MessageType.image,
+        userId: user.id,
+        userName: user.username,
+        conversationId: _currentConversationId,
+        isBot: false,
+        clientMessageId: clientMessageId,
+      );
+
+      _messages.add(imageMessage);
+      notifyListeners();
+
+      // Send via WebSocket
+      if (!_webSocketService!.isConnected) {
+        debugPrint('WebSocket not connected. Attempting to reconnect...');
+        await _webSocketService!.connect(user.id);
+      }
+
+      // Send image via WebSocket with clientMessageId
+      _webSocketService!.sendImageMessage(
+        imageBase64: imageBase64,
+        imageMimeType: mimeType,
+        conversationId: _currentConversationId!,
+        userName: user.username,
+        userId: user.id,
+        text: "", // Optional text can be added later
+        clientMessageId: clientMessageId,
+      );
+    } catch (e) {
+      debugPrint('Error sending image message: $e');
+      // Remove optimistic message on error (if it was created)
+      if (imageMessage != null) {
+        _messages.removeWhere((msg) => msg.id == imageMessage!.id);
+        notifyListeners();
+      }
     }
   }
 

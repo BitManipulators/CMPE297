@@ -162,6 +162,43 @@ class WebSocketService extends ChangeNotifier {
     }
   }
 
+  void sendImageMessage({
+    required String imageBase64,
+    required String imageMimeType,
+    required String conversationId,
+    required String userName,
+    required String userId,
+    String text = "",
+    String? clientMessageId,
+  }) {
+    if (!_isConnected || _channel == null) {
+      debugPrint('WebSocket not connected. isConnected: $_isConnected, channel: ${_channel != null}');
+      throw Exception('WebSocket not connected');
+    }
+
+    final message = {
+      'type': 'send_image',
+      'imageBase64': imageBase64,
+      'imageMimeType': imageMimeType,
+      'conversationId': conversationId,
+      'userName': userName,
+      'userId': userId,
+      'text': text,
+    };
+
+    if (clientMessageId != null) {
+      message['clientMessageId'] = clientMessageId;
+    }
+
+    try {
+      _channel!.sink.add(json.encode(message));
+      debugPrint('Image message sent via WebSocket');
+    } catch (e) {
+      debugPrint('Error sending image message via WebSocket: $e');
+      rethrow;
+    }
+  }
+
   void joinConversation(String conversationId) {
     if (!_isConnected || _channel == null) {
       throw Exception('WebSocket not connected');
