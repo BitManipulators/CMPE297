@@ -79,6 +79,31 @@ A Flutter mobile chat application for survival guidance and plant recognition wi
 
 ## Environment Variables
 
+### Frontend (.env file in project root)
+
+Create a `.env` file in the **project root** (same level as `pubspec.yaml`) with:
+
+```env
+# Google OAuth Client ID (Required for Google Sign-In on web)
+# Get this from Google Cloud Console: https://console.cloud.google.com/
+# See GOOGLE_OAUTH_SETUP.md for detailed setup instructions
+GOOGLE_CLIENT_ID=your_google_client_id_here.apps.googleusercontent.com
+```
+
+**Important**: The Client ID in `web/index.html` is automatically injected from your `.env` file. Before building/running the web app, run:
+
+```bash
+# Using Dart script (recommended)
+dart run scripts/replace_env_in_html.dart
+
+# Or using shell script
+./scripts/replace_env_in_html.sh
+```
+
+This replaces the `$GOOGLE_CLIENT_ID` placeholder in `web/index.html` with the value from your `.env` file.
+
+### Backend (.env file in backend/ directory)
+
 Create a `.env` file in the `backend/` directory with the following variables:
 
 ### Required Environment Variables
@@ -100,6 +125,11 @@ AWS_REGION=us-west-2
 # Pinecone API Key (Required for vector database)
 # Get your API key from: https://www.pinecone.io/
 PINECONE_API_KEY=your_pinecone_api_key_here
+
+# Google OAuth Client ID (Required for Google Sign-In verification on backend)
+# This should match the GOOGLE_CLIENT_ID in the frontend .env file
+# Get this from Google Cloud Console: https://console.cloud.google.com/
+GOOGLE_CLIENT_ID=your_google_client_id_here.apps.googleusercontent.com
 ```
 
 ### Setting Up Environment Variables
