@@ -15,6 +15,9 @@ import logging
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from google.auth.transport import requests as google_requests
+from google.oauth2 import id_token
+import requests as http_requests
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -22,6 +25,9 @@ logger = logging.getLogger(__name__)
 
 # Load environment variables
 load_dotenv()
+
+# Google OAuth configuration
+GOOGLE_CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 
 # Gemini AI imports
 try:
@@ -108,6 +114,10 @@ class User(BaseModel):
     id: str
     username: str
     email: Optional[str] = None
+    googleId: Optional[str] = None
+    picture: Optional[str] = None
+    createdAt: Optional[str] = None
+    lastLoginAt: Optional[str] = None
 
 
 class Message(BaseModel):
@@ -528,6 +538,133 @@ async def register_user(request: RegisterUserRequest):
         users[user_id] = user
 
     return user
+
+
+@app.post("/api/auth/google")
+async def google_auth(request: dict = Body(...)):
+    """Authenticate user with Google OAuth"""
+    id_token_str = request.get("idToken")
+    access_token_str = request.get("accessToken")
+
+    # Handle None, empty string, or missing values
+    id_token_str = id_token_str if id_token_str and str(id_token_str).strip() else None
+    access_token_str = access_token_str if access_token_str and str(access_token_str).strip() else None
+
+    if not id_token_str and not access_token_str:
+        raise HTTPException(status_code=400, detail="ID token or access token is required")
+
+    try:
+        if not GOOGLE_CLIENT_ID:
+            raise HTTPException(
+                status_code=500,
+                detail="Google OAuth not configured. Set GOOGLE_CLIENT_ID environment variable."
+            )
+
+        # Try to use ID token first (preferred method)
+        if id_token_str:
+            # Verify the ID token
+            idinfo = id_token.verify_oauth2_token(
+                id_token_str,
+                google_requests.Request(),
+                GOOGLE_CLIENT_ID
+            )
+            # Extract user info from ID token
+            google_id = idinfo.get("sub")
+            email = idinfo.get("email")
+            name = idinfo.get("name", email.split("@")[0] if email else "User")
+            picture = idinfo.get("picture")
+        elif access_token_str:
+            # Fallback: Use access token to get user info from Google API
+            userinfo_response = http_requests.get(
+                "https://www.googleapis.com/oauth2/v2/userinfo",
+                headers={"Authorization": f"Bearer {access_token_str}"}
+            )
+            if userinfo_response.status_code != 200:
+                raise HTTPException(
+                    status_code=401,
+                    detail="Invalid access token"
+                )
+            userinfo = userinfo_response.json()
+            google_id = userinfo.get("id")
+            email = userinfo.get("email")
+            name = userinfo.get("name", email.split("@")[0] if email else "User")
+            picture = userinfo.get("picture")
+        else:
+            raise HTTPException(status_code=400, detail="ID token or access token is required")
+
+        # Check if user exists (by email or Google ID)
+        user = None
+        user_id = None
+
+        if db:
+            # Check Firebase for existing user
+            users_ref = db.collection("users")
+            # Try to find by email first
+            if email:
+                email_query = users_ref.where("email", "==", email).limit(1).stream()
+                for doc in email_query:
+                    user = doc.to_dict()
+                    user_id = doc.id
+                    break
+
+            # If not found, try to find by Google ID
+            if not user:
+                google_id_query = users_ref.where("googleId", "==", google_id).limit(1).stream()
+                for doc in google_id_query:
+                    user = doc.to_dict()
+                    user_id = doc.id
+                    break
+        else:
+            # In-memory: search by email or Google ID
+            for uid, u in users.items():
+                if u.get("email") == email or u.get("googleId") == google_id:
+                    user = u.copy()
+                    user_id = uid
+                    break
+
+        # Create or update user
+        if user:
+            # Update user info
+            updates = {
+                "email": email,
+                "username": name,
+                "googleId": google_id,
+                "picture": picture,
+                "lastLoginAt": datetime.utcnow().isoformat()
+            }
+            if db:
+                db.collection("users").document(user_id).update(updates)
+            else:
+                users[user_id].update(updates)
+            user.update(updates)
+            user["id"] = user_id
+        else:
+            # Create new user
+            user_id = str(uuid.uuid4())
+            user = {
+                "id": user_id,
+                "username": name,
+                "email": email,
+                "googleId": google_id,
+                "picture": picture,
+                "createdAt": datetime.utcnow().isoformat(),
+                "lastLoginAt": datetime.utcnow().isoformat()
+            }
+
+            if db:
+                db.collection("users").document(user_id).set(user)
+            else:
+                users[user_id] = user
+
+        return user
+
+    except ValueError as e:
+        # Invalid token
+        logger.error(f"Invalid Google token: {e}")
+        raise HTTPException(status_code=401, detail="Invalid Google token")
+    except Exception as e:
+        logger.error(f"Google auth error: {e}")
+        raise HTTPException(status_code=500, detail=f"Authentication failed: {str(e)}")
 
 
 @app.get("/api/users/{user_id}")

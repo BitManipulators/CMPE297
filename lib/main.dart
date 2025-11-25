@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'screens/login_screen.dart';
 import 'screens/conversation_list_screen.dart';
 import 'screens/simple_chat_screen.dart';
@@ -12,7 +13,16 @@ import 'dart:async';
 import 'models/conversation.dart';
 import 'package:flutter/foundation.dart';
 
-void main() {
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+
+  // Load .env file
+  try {
+    await dotenv.load(fileName: ".env");
+  } catch (e) {
+    debugPrint('Warning: Could not load .env file: $e');
+  }
+
   runApp(const IntoTheWildApp());
 }
 

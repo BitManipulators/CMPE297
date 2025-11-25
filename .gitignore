@@ -44,3 +44,13 @@ app.*.map.json
 /android/app/profile
 /android/app/release
 backend/venv/
+
+.env
+.env.example
+
+# Flutter DevTools configuration (user-specific)
+devtools_options.yaml
+
+backend/serviceAccountKey.json
+backend/rag/all_plants_streaming.json
+backend/rag/__pycache__/
