@@ -18,6 +18,7 @@ from dotenv import load_dotenv
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 import requests as http_requests
+import base64
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -375,6 +376,112 @@ Keep your responses accurate, informative, and safety-focused. Be friendly and e
 
             # Fallback response on error
             return f"I apologize, but I encountered an error processing your message. Please try again. Your message was: {user_message[:100]}"
+
+    async def analyze_plant_image(self, image_data: bytes, image_mime_type: str, user_message: str = "", conversation_context: List[Dict] = None) -> str:
+        """
+        Analyze plant image using Gemini Vision API (using gemini-2.5-flash).
+
+        Args:
+            image_data: Raw image bytes
+            image_mime_type: MIME type (e.g., 'image/jpeg', 'image/png')
+            user_message: Optional user message/question about the image
+            conversation_context: List of previous messages for context
+
+        Returns:
+            AI-generated plant identification and information
+        """
+        if not self.model:
+            logger.warning("Gemini model not available, using fallback response")
+            return "I'm sorry, but I cannot analyze images right now. Please ensure the AI service is properly configured."
+
+        try:
+            # Build prompt parts
+            prompt_parts = []
+
+            # System prompt for plant identification
+            system_prompt = """You are a plant identification expert specializing in analyzing images of plants found in the wild.
+When analyzing plant images, provide:
+1. Plant name (common name and scientific name if identifiable)
+2. Key identifying features visible in the image
+3. Edibility status (edible/poisonous/unknown) - BE VERY CAUTIOUS
+4. Safety warnings about lookalike plants or toxic parts
+5. Medicinal uses (if any and if known)
+6. Habitat and growing conditions
+7. Any other relevant information
+
+CRITICAL SAFETY GUIDELINES:
+- NEVER state a plant is edible unless you are HIGHLY confident
+- Always warn about potential lookalike toxic plants
+- Recommend consulting local experts or field guides
+- When in doubt, advise users to err on the side of caution
+- If the image is unclear or doesn't show a plant, say so
+
+Be accurate, informative, and prioritize safety above all else."""
+            prompt_parts.append(system_prompt)
+
+            # Get RAG context if available
+            if self.rag_service and self.rag_service.is_available():
+                try:
+                    query = user_message if user_message else "plant identification"
+                    rag_context = self.rag_service.get_rag_context(query, top_k=3)
+                    if rag_context:
+                        prompt_parts.append("\n" + rag_context)
+                        prompt_parts.append("\nUse the above plant information to enhance your analysis if relevant.")
+                except Exception as e:
+                    logger.error(f"Error getting RAG context: {e}")
+
+            # Add conversation context if available
+            if conversation_context:
+                context_messages = conversation_context[::-1]
+                for msg in context_messages[-5:]:
+                    text = msg.get("text", "")
+                    is_bot = msg.get("isBot", False)
+                    if text:
+                        if is_bot:
+                            prompt_parts.append(f"Assistant: {text}")
+                        else:
+                            user_name = msg.get("userName", "User")
+                            prompt_parts.append(f"{user_name}: {text}")
+
+            # Add user message/question if provided
+            if user_message:
+                prompt_parts.append(f"User: {user_message}")
+            else:
+                prompt_parts.append("User: Please identify this plant and provide information about it.")
+
+            prompt_parts.append("Assistant:")
+
+            # Prepare image part for Gemini Vision
+            image_part = {
+                "mime_type": image_mime_type,
+                "data": image_data
+            }
+
+            # Combine image and prompt (Gemini Vision requires image first, then text)
+            content_parts = [image_part] + prompt_parts
+
+            # Generate response using Gemini Vision (same model, just with image input)
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(content_parts)
+            )
+
+            # Extract text from response
+            ai_response = response.text.strip() if response.text else "I'm sorry, I couldn't analyze this image. Please try again."
+
+            logger.info(f"Generated plant image analysis response")
+            return ai_response
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Error analyzing plant image: {e}")
+
+            if "404" in error_msg or "not found" in error_msg.lower():
+                logger.error(f"Model '{self.model_name}' not available for vision. Please check your API key permissions.")
+                self.model = None
+
+            return f"I apologize, but I encountered an error analyzing the image. Please try again. Error: {str(e)[:100]}"
 
 
 # WebSocket connection manager
@@ -1009,6 +1116,114 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                         "type": "new_message",
                         "message": bot_message
                     }, conversation_id)
+
+            elif message_type == "send_image":
+                # Handle image message
+                conversation_id = data.get("conversationId")
+                image_base64 = data.get("imageBase64")
+                image_mime_type = data.get("imageMimeType", "image/jpeg")
+                user_message = data.get("text", "").strip()  # Optional text with image
+
+                if not image_base64 or not conversation_id:
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "Image data and conversation ID are required"
+                    }, user_id)
+                    continue
+
+                # Check if user is a participant
+                conversation = await get_conversation(conversation_id)
+                if not conversation:
+                    logger.warning(f"Conversation {conversation_id} not found")
+                    continue
+
+                participants = conversation.get("participants", [])
+                if user_id not in participants:
+                    logger.warning(f"User {user_id} is not a participant in conversation {conversation_id}")
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": "You are not a member of this conversation."
+                    }, user_id)
+                    continue
+
+                try:
+                    # Decode base64 image
+                    image_data = base64.b64decode(image_base64)
+
+                    # Create image message
+                    image_message = {
+                        "id": str(uuid.uuid4()),
+                        "text": user_message if user_message else "📷 Plant image",
+                        "userId": user_id,
+                        "userName": data.get("userName", "User"),
+                        "conversationId": conversation_id,
+                        "createdAt": datetime.utcnow().isoformat(),
+                        "isBot": False,
+                        "type": "image",
+                        "imageUrl": f"data:{image_mime_type};base64,{image_base64[:100]}..."  # Truncated for storage
+                    }
+
+                    # Include clientMessageId if provided
+                    client_message_id = data.get("clientMessageId")
+                    if client_message_id:
+                        image_message["clientMessageId"] = client_message_id
+
+                    # Save message
+                    await save_message(image_message)
+
+                    # Broadcast to conversation participants
+                    await manager.broadcast_to_conversation({
+                        "type": "new_message",
+                        "message": image_message
+                    }, conversation_id, exclude_user=user_id)
+
+                    # Send confirmation to sender
+                    await manager.send_personal_message({
+                        "type": "message_sent",
+                        "message": image_message
+                    }, user_id)
+
+                    # If bot is in conversation, analyze the image
+                    conversation = await get_conversation(conversation_id)
+                    if conversation and conversation.get("hasBot"):
+                        # Get recent messages for context
+                        recent_messages = await get_messages(conversation_id, limit=10)
+
+                        # Analyze image with Gemini Vision
+                        analysis_text = await ai_service.analyze_plant_image(
+                            image_data=image_data,
+                            image_mime_type=image_mime_type,
+                            user_message=user_message if user_message else "",
+                            conversation_context=recent_messages
+                        )
+
+                        # Create bot response message
+                        bot_message = {
+                            "id": str(uuid.uuid4()),
+                            "text": analysis_text,
+                            "userId": "bot",
+                            "userName": "AI Bot",
+                            "conversationId": conversation_id,
+                            "createdAt": datetime.utcnow().isoformat(),
+                            "isBot": True,
+                            "type": "text"
+                        }
+
+                        # Save bot message
+                        await save_message(bot_message)
+
+                        # Broadcast bot response
+                        await manager.broadcast_to_conversation({
+                            "type": "new_message",
+                            "message": bot_message
+                        }, conversation_id)
+
+                except Exception as e:
+                    logger.error(f"Error processing image message: {e}")
+                    await manager.send_personal_message({
+                        "type": "error",
+                        "message": f"Error processing image: {str(e)}"
+                    }, user_id)
 
             elif message_type == "join_conversation":
                 # User joining a conversation
