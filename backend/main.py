@@ -50,7 +50,7 @@ except ImportError as e:
 # Firebase imports
 try:
     import firebase_admin
-    from firebase_admin import credentials, firestore
+    from firebase_admin import credentials, firestore, storage
     FIREBASE_AVAILABLE = True
 except ImportError as e:
     FIREBASE_AVAILABLE = False
@@ -836,6 +836,61 @@ async def get_messages_endpoint(conversation_id: str, limit: int = 50):
     return {"messages": messages}
 
 
+@app.post("/api/images/upload")
+async def upload_image(
+    imageBase64: str = Body(..., description="Base64 encoded image"),
+    imageMimeType: str = Body(..., description="MIME type of the image (e.g., image/jpeg)"),
+    conversationId: str = Body(..., description="Conversation ID for organizing images")
+):
+    """Upload image to Firebase Storage and return download URL"""
+    try:
+        # Decode base64 image
+        image_data = base64.b64decode(imageBase64)
+
+        # Generate unique filename
+        file_extension = "jpg"
+        if "png" in imageMimeType:
+            file_extension = "png"
+        elif "webp" in imageMimeType:
+            file_extension = "webp"
+        elif "gif" in imageMimeType:
+            file_extension = "gif"
+
+        filename = f"chat_images/{conversationId}/{uuid.uuid4()}.{file_extension}"
+
+        if FIREBASE_AVAILABLE and db:
+            try:
+                # Get Firebase Storage bucket
+                bucket = storage.bucket()
+                blob = bucket.blob(filename)
+
+                # Upload image data
+                blob.upload_from_string(image_data, content_type=imageMimeType)
+
+                # Make the blob publicly accessible
+                blob.make_public()
+
+                # Get public URL
+                image_url = blob.public_url
+
+                logger.info(f"Image uploaded successfully: {filename}")
+                return {"imageUrl": image_url, "success": True}
+            except Exception as e:
+                logger.error(f"Firebase Storage upload failed: {e}")
+                # Fallback: return data URL if Firebase Storage fails
+                data_url = f"data:{imageMimeType};base64,{imageBase64}"
+                return {"imageUrl": data_url, "success": False, "error": str(e)}
+        else:
+            # Fallback: return data URL if Firebase not available
+            logger.warning("Firebase Storage not available, returning data URL")
+            data_url = f"data:{imageMimeType};base64,{imageBase64}"
+            return {"imageUrl": data_url, "success": False, "error": "Firebase Storage not configured"}
+
+    except Exception as e:
+        logger.error(f"Image upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
+
+
 @app.get("/api/conversations")
 async def get_all_conversations(user_id: Optional[str] = Query(None, description="User ID to filter conversations")):
     """Get all conversations. For groups, return all groups. For one-to-one, return only user's conversations."""
@@ -1120,14 +1175,15 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
             elif message_type == "send_image":
                 # Handle image message
                 conversation_id = data.get("conversationId")
-                image_base64 = data.get("imageBase64")
+                image_url = data.get("imageUrl")  # Preferred: Firebase Storage URL
+                image_base64 = data.get("imageBase64")  # Fallback: base64 data
                 image_mime_type = data.get("imageMimeType", "image/jpeg")
                 user_message = data.get("text", "").strip()  # Optional text with image
 
-                if not image_base64 or not conversation_id:
+                if not conversation_id:
                     await manager.send_personal_message({
                         "type": "error",
-                        "message": "Image data and conversation ID are required"
+                        "message": "Conversation ID is required"
                     }, user_id)
                     continue
 
@@ -1147,10 +1203,65 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                     continue
 
                 try:
-                    # Decode base64 image
-                    image_data = base64.b64decode(image_base64)
+                    # If imageUrl is provided, use it directly (already uploaded to Firebase Storage)
+                    # Otherwise, if imageBase64 is provided, upload it first
+                    if image_url:
+                        # Image already uploaded, use the provided URL
+                        final_image_url = image_url
+                    elif image_base64:
+                        # Upload base64 image to Firebase Storage
+                        try:
+                            # Decode base64 image
+                            image_data = base64.b64decode(image_base64)
 
-                    # Create image message
+                            # Generate unique filename
+                            file_extension = "jpg"
+                            if "png" in image_mime_type:
+                                file_extension = "png"
+                            elif "webp" in image_mime_type:
+                                file_extension = "webp"
+                            elif "gif" in image_mime_type:
+                                file_extension = "gif"
+
+                            filename = f"chat_images/{conversation_id}/{uuid.uuid4()}.{file_extension}"
+
+                            if FIREBASE_AVAILABLE and db:
+                                try:
+                                    # Get Firebase Storage bucket
+                                    bucket = storage.bucket()
+                                    blob = bucket.blob(filename)
+
+                                    # Upload image data
+                                    blob.upload_from_string(image_data, content_type=image_mime_type)
+
+                                    # Make the blob publicly accessible
+                                    blob.make_public()
+
+                                    # Get public URL
+                                    final_image_url = blob.public_url
+                                    logger.info(f"Image uploaded to Firebase Storage: {filename}")
+                                except Exception as e:
+                                    logger.error(f"Firebase Storage upload failed: {e}")
+                                    # Fallback to data URL
+                                    final_image_url = f"data:{image_mime_type};base64,{image_base64}"
+                            else:
+                                # Fallback to data URL if Firebase not available
+                                final_image_url = f"data:{image_mime_type};base64,{image_base64}"
+                        except Exception as e:
+                            logger.error(f"Error processing image: {e}")
+                            await manager.send_personal_message({
+                                "type": "error",
+                                "message": f"Failed to process image: {str(e)}"
+                            }, user_id)
+                            continue
+                    else:
+                        await manager.send_personal_message({
+                            "type": "error",
+                            "message": "Either imageUrl or imageBase64 is required"
+                        }, user_id)
+                        continue
+
+                    # Create image message with Firebase Storage URL or data URL
                     image_message = {
                         "id": str(uuid.uuid4()),
                         "text": user_message if user_message else "📷 Plant image",
@@ -1160,7 +1271,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                         "createdAt": datetime.utcnow().isoformat(),
                         "isBot": False,
                         "type": "image",
-                        "imageUrl": f"data:{image_mime_type};base64,{image_base64[:100]}..."  # Truncated for storage
+                        "imageUrl": final_image_url  # Firebase Storage URL or data URL fallback
                     }
 
                     # Include clientMessageId if provided

@@ -8,7 +8,7 @@ import '../models/user.dart';
 import '../config/app_config.dart';
 
 class AuthService extends ChangeNotifier {
-  static const String _baseUrl = AppConfig.backendBaseUrl;
+  static String get _baseUrl => AppConfig.backendBaseUrl;
   User? _currentUser;
   bool _isAuthenticated = false;
 

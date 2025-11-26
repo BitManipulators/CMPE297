@@ -6,7 +6,7 @@ import '../models/chat_message.dart';
 import '../config/app_config.dart';
 
 class ConversationService extends ChangeNotifier {
-  static const String _baseUrl = AppConfig.backendBaseUrl;
+  static String get _baseUrl => AppConfig.backendBaseUrl;
   Conversation? _currentConversation;
   final List<Conversation> _conversations = [];
   final Map<String, String> _usernameCache = {}; // Cache for participant usernames
