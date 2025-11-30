@@ -4,6 +4,9 @@ data "aws_availability_zones" "available" {
   state = "available"
 }
 
+# Get cloudflare IP address ranges
+data "cloudflare_ip_ranges" "cloudflare" {}
+
 # 2. VPC Configuration
 module "vpc" {
   source  = "terraform-aws-modules/vpc/aws"
@@ -35,6 +38,29 @@ module "vpc" {
   # Tags for Private Load Balancers (Internal only)
   private_subnet_tags = {
     "kubernetes.io/role/internal-elb" = 1
+  }
+}
+
+# 2. Create a dedicated Security Group for the NLB / Nodes
+resource "aws_security_group" "ingress_allow_cloudflare" {
+  name        = "allow-cloudflare-only"
+  description = "Allow HTTPS from Cloudflare IPs only"
+  vpc_id      = module.vpc.vpc_id
+
+  ingress {
+    description = "HTTPS from Cloudflare IPv4"
+    from_port   = 443
+    to_port     = 443
+    protocol    = "tcp"
+    cidr_blocks = data.cloudflare_ip_ranges.cloudflare.ipv4_cidr_blocks
+  }
+
+  ingress {
+    description      = "HTTPS from Cloudflare IPv6"
+    from_port        = 443
+    to_port          = 443
+    protocol         = "tcp"
+    ipv6_cidr_blocks = data.cloudflare_ip_ranges.cloudflare.ipv6_cidr_blocks
   }
 }
 
@@ -88,6 +114,9 @@ module "eks" {
       # This matches where the single NAT Gateway lives (usually the first AZ).
       # This minimizes cross-AZ data transfer fees.
       subnet_ids = [element(module.vpc.private_subnets, 0)]
+
+      # Allow access from cloudflare ips only
+      vpc_security_group_ids = [aws_security_group.ingress_allow_cloudflare.id]
 
       ami_type = "AL2023_x86_64_STANDARD"
 
@@ -252,7 +281,36 @@ resource "aws_ecr_repository" "fastapi_backend" {
 }
 
 # ---------------------------------------------------------
-# 8. Flutter Frontend Deployment
+# 8. Build & Push Flutter Image
+# ---------------------------------------------------------
+resource "docker_image" "flutter_image" {
+  name = "${aws_ecr_repository.flutter_app.repository_url}:v1"
+
+  build {
+    # Path to the folder containing the Flutter Dockerfile
+    context = "./" 
+    dockerfile = "Dockerfile"
+    platform = "linux/amd64" 
+  }
+
+  # This ensures the image is rebuilt if files change
+  triggers = {
+    dir_sha1 = sha1(join("", [for f in fileset("./lib", "**") : filesha1("./lib/${f}")]))
+  }
+}
+
+resource "docker_registry_image" "flutter_push" {
+  name          = docker_image.flutter_image.name
+  keep_remotely = false # Delete the image from ECR when you run 'terraform destroy'
+  
+  # Wait for the build to finish
+  triggers = {
+    image_sha1 = docker_image.flutter_image.repo_digest
+  }
+}
+
+# ---------------------------------------------------------
+# 9. Flutter Frontend Deployment
 # ---------------------------------------------------------
 resource "kubernetes_deployment_v1" "flutter_frontend" {
   metadata {
@@ -264,8 +322,8 @@ resource "kubernetes_deployment_v1" "flutter_frontend" {
   }
 
   spec {
-    # Run 2 copies for high availability (zero downtime during updates)
-    replicas = 2
+    # Run 3 copies for high availability (zero downtime during updates)
+    replicas = 3
 
     selector {
       match_labels = {
@@ -306,10 +364,12 @@ resource "kubernetes_deployment_v1" "flutter_frontend" {
       }
     }
   }
+
+  depends_on = [docker_registry_image.flutter_push]
 }
 
 # ---------------------------------------------------------
-# 9. Flutter Frontend Service
+# 10. Flutter Frontend Service
 # ---------------------------------------------------------
 resource "kubernetes_service_v1" "flutter_frontend" {
   metadata {
@@ -333,7 +393,36 @@ resource "kubernetes_service_v1" "flutter_frontend" {
 }
 
 # ---------------------------------------------------------
-# 10. FastAPI Backend Deployment
+# 11. Build & Push FastAPI Image
+# ---------------------------------------------------------
+resource "docker_image" "fastapi_image" {
+  name = "${aws_ecr_repository.fastapi_backend.repository_url}:v1"
+
+  build {
+    # Path to the folder containing the FastAPI Dockerfile
+    context = "./backend" 
+    dockerfile = "Dockerfile.fastapi"
+    
+    # Platform for compatibility
+    platform = "linux/amd64"
+  }
+
+  triggers = {
+    dir_sha1 = sha1(join("", [for f in fileset("./backend", "**") : filesha1("./backend/${f}")]))
+  }
+}
+
+resource "docker_registry_image" "fastapi_push" {
+  name          = docker_image.fastapi_image.name
+  keep_remotely = false
+  
+  triggers = {
+    image_sha1 = docker_image.fastapi_image.repo_digest
+  }
+}
+
+# ---------------------------------------------------------
+# 12. FastAPI Backend Deployment
 # ---------------------------------------------------------
 resource "kubernetes_deployment_v1" "fastapi_backend" {
   metadata {
@@ -345,7 +434,7 @@ resource "kubernetes_deployment_v1" "fastapi_backend" {
   }
 
   spec {
-    replicas = 1 # High Availability Not Yet Supported
+    replicas = 3 # High Availability Not Yet Supported
     #replicas = 2 # High Availability
 
     selector {
@@ -392,10 +481,12 @@ resource "kubernetes_deployment_v1" "fastapi_backend" {
       }
     }
   }
+
+  depends_on = [docker_registry_image.fastapi_push]
 }
 
 # ---------------------------------------------------------
-# 11. FastAPI Backend Service
+# 13. FastAPI Backend Service
 # ---------------------------------------------------------
 resource "kubernetes_service_v1" "fastapi_backend" {
   metadata {
@@ -415,5 +506,32 @@ resource "kubernetes_service_v1" "fastapi_backend" {
     }
 
     type = "ClusterIP" # Internal only
+  }
+}
+
+# ---------------------------------------------------------
+# 14. Cloudflare WAF Rules
+# ---------------------------------------------------------
+resource "cloudflare_ruleset" "zone_custom_firewall" {
+  zone_id     = var.cloudflare_zone_id
+  name        = "Basic Security Rules"
+  description = "Block bad countries and admin panels"
+  kind        = "zone"
+  phase       = "http_request_firewall_custom"
+
+  # Rule 1: Block specific countries (e.g., CN, RU, NK)
+  rules {
+    action = "block"
+    expression = "(ip.geoip.country in {\"CN\" \"RU\" \"KP\" \"IR\"})"
+    description = "Block High Risk Countries"
+    enabled = true
+  }
+
+  # Rule 2: Challenge bad user agents (Python scripts, curl, etc)
+  rules {
+    action = "managed_challenge"
+    expression = "(http.user_agent contains \"Python\" or http.user_agent contains \"curl\" or http.user_agent contains \"wget\")"
+    description = "Challenge Script Bots"
+    enabled = true
   }
 }

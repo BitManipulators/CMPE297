@@ -50,3 +50,8 @@ variable "tls_key" {
   type        = string
   sensitive   = true
 }
+
+variable "cloudflare_zone_id" {
+  description = "The Zone ID of your domain from Cloudflare Dashboard"
+  type        = string
+}
