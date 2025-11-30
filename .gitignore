@@ -54,3 +54,9 @@ devtools_options.yaml
 backend/serviceAccountKey.json
 backend/rag/all_plants_streaming.json
 backend/rag/__pycache__/
+
+# Terraform
+*.tfvars
+.terraform*
+.terraform
+terraform.tfstate
