@@ -61,7 +61,9 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^3.0.0
   json_serializable: ^6.7.1
-  build_runner: ^2.4.7
+  build_runner: ^2.4.8
+  mockito: ^5.4.4
+  mocktail: ^1.0.3
 
 flutter:
   uses-material-design: true
