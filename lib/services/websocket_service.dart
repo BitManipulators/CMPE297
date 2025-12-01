@@ -6,7 +6,7 @@ import '../models/chat_message.dart';
 import '../config/app_config.dart';
 
 class WebSocketService extends ChangeNotifier {
-  static const String _baseUrl = AppConfig.websocketBaseUrl;
+  static String get _baseUrl => AppConfig.websocketBaseUrl;
   WebSocketChannel? _channel;
   String? _userId;
   bool _isConnected = false;
@@ -163,8 +163,9 @@ class WebSocketService extends ChangeNotifier {
   }
 
   void sendImageMessage({
-    required String imageBase64,
-    required String imageMimeType,
+    String? imageUrl,
+    String? imageBase64,
+    String? imageMimeType,
     required String conversationId,
     required String userName,
     required String userId,
@@ -176,15 +177,25 @@ class WebSocketService extends ChangeNotifier {
       throw Exception('WebSocket not connected');
     }
 
+    // Prefer imageUrl (Firebase Storage URL) over base64
     final message = {
       'type': 'send_image',
-      'imageBase64': imageBase64,
-      'imageMimeType': imageMimeType,
       'conversationId': conversationId,
       'userName': userName,
       'userId': userId,
       'text': text,
     };
+
+    if (imageUrl != null) {
+      // Send Firebase Storage URL (preferred)
+      message['imageUrl'] = imageUrl;
+    } else if (imageBase64 != null && imageMimeType != null) {
+      // Fallback: send base64 if URL not available
+      message['imageBase64'] = imageBase64;
+      message['imageMimeType'] = imageMimeType;
+    } else {
+      throw Exception('Either imageUrl or imageBase64 with imageMimeType must be provided');
+    }
 
     if (clientMessageId != null) {
       message['clientMessageId'] = clientMessageId;
@@ -192,7 +203,7 @@ class WebSocketService extends ChangeNotifier {
 
     try {
       _channel!.sink.add(json.encode(message));
-      debugPrint('Image message sent via WebSocket');
+      debugPrint('Image message sent via WebSocket (${imageUrl != null ? "URL" : "base64"})');
     } catch (e) {
       debugPrint('Error sending image message via WebSocket: $e');
       rethrow;

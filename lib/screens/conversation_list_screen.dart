@@ -5,8 +5,10 @@ import '../services/conversation_service.dart';
 import '../services/websocket_service.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
+import '../services/analytics_service.dart';
 import '../models/conversation.dart';
 import '../widgets/input_buttons.dart';
+import '../widgets/chat_image_widget.dart';
 import 'simple_chat_screen.dart';
 import 'login_screen.dart';
 
@@ -26,6 +28,7 @@ class _ConversationListScreenState extends State<ConversationListScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      AnalyticsService.logScreenView('conversation_list_screen');
       _initializeServices();
     });
   }
@@ -448,22 +451,12 @@ class _ConversationListScreenState extends State<ConversationListScreen> {
                     ),
                   if (message.imageUrl != null) ...[
                     const SizedBox(height: 8),
-                    ClipRRect(
+                    ChatImageWidget(
+                      imageUrl: message.imageUrl!,
+                      width: 240,
+                      height: 240,
+                      fit: BoxFit.cover,
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        message.imageUrl!,
-                        width: 240,
-                        height: 240,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: 240,
-                            height: 240,
-                            color: Colors.grey[300],
-                            child: const Icon(Icons.image_not_supported),
-                          );
-                        },
-                      ),
                     ),
                     const SizedBox(height: 8),
                   ],

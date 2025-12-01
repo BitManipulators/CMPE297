@@ -6,12 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:speech_to_text/speech_to_text.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:http/http.dart' as http;
 import '../models/chat_message.dart';
 import '../models/conversation.dart';
+import '../config/app_config.dart';
 import 'websocket_service.dart';
 import 'conversation_service.dart';
 import 'auth_service.dart';
 import 'notification_service.dart';
+import 'analytics_service.dart';
 
 class ChatService extends ChangeNotifier {
   final List<ChatMessage> _messages = [];
@@ -596,6 +599,10 @@ class ChatService extends ChangeNotifier {
         clientMessageId: clientMessageId,
       );
 
+      // Log analytics event
+      final conversationType = _conversationService?.currentConversation?.type ?? 'unknown';
+      await AnalyticsService.logChatMessageSent(conversationType: conversationType);
+
       debugPrint('Message sent successfully: ${text.trim()}');
     } catch (e) {
       debugPrint('Error sending message: $e');
@@ -745,19 +752,44 @@ class ChatService extends ChangeNotifier {
         mimeType = 'image/gif';
       }
 
-      // Convert to base64
+      // Convert to base64 for upload
       final imageBase64 = base64Encode(imageBytes);
 
-      // Create data URL for display (works with Image.network)
-      final dataUrl = 'data:$mimeType;base64,$imageBase64';
+      // Upload image to Firebase Storage via API endpoint
+      String? firebaseImageUrl;
+      try {
+        final uploadResponse = await http.post(
+          Uri.parse('${AppConfig.backendBaseUrl}/api/images/upload'),
+          headers: {'Content-Type': 'application/json'},
+          body: json.encode({
+            'imageBase64': imageBase64,
+            'imageMimeType': mimeType,
+            'conversationId': _currentConversationId,
+          }),
+        );
 
-      // Create optimistic message with clientMessageId and data URL for display
+        if (uploadResponse.statusCode == 200) {
+          final uploadData = json.decode(uploadResponse.body);
+          firebaseImageUrl = uploadData['imageUrl'] as String?;
+          debugPrint('Image uploaded to Firebase Storage: $firebaseImageUrl');
+        } else {
+          debugPrint('Image upload failed: ${uploadResponse.statusCode} - ${uploadResponse.body}');
+          // Fallback to data URL if upload fails
+          firebaseImageUrl = 'data:$mimeType;base64,$imageBase64';
+        }
+      } catch (e) {
+        debugPrint('Error uploading image to Firebase Storage: $e');
+        // Fallback to data URL if upload fails
+        firebaseImageUrl = 'data:$mimeType;base64,$imageBase64';
+      }
+
+      // Create optimistic message with Firebase Storage URL or data URL fallback
       imageMessage = ChatMessage(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         text: "📷 Plant image",
         createdAt: DateTime.now(),
         isUser: true,
-        imageUrl: dataUrl, // Use data URL so it works with Image.network()
+        imageUrl: firebaseImageUrl, // Firebase Storage URL or data URL fallback
         type: MessageType.image,
         userId: user.id,
         userName: user.username,
@@ -775,16 +807,33 @@ class ChatService extends ChangeNotifier {
         await _webSocketService!.connect(user.id);
       }
 
-      // Send image via WebSocket with clientMessageId
-      _webSocketService!.sendImageMessage(
-        imageBase64: imageBase64,
-        imageMimeType: mimeType,
-        conversationId: _currentConversationId!,
-        userName: user.username,
-        userId: user.id,
-        text: "", // Optional text can be added later
-        clientMessageId: clientMessageId,
-      );
+      // Send image URL via WebSocket (preferred) or base64 as fallback
+      if (firebaseImageUrl != null && firebaseImageUrl.startsWith('http')) {
+        // Send Firebase Storage URL
+        _webSocketService!.sendImageMessage(
+          imageUrl: firebaseImageUrl,
+          conversationId: _currentConversationId!,
+          userName: user.username,
+          userId: user.id,
+          text: "", // Optional text can be added later
+          clientMessageId: clientMessageId,
+        );
+      } else {
+        // Fallback: send base64 if Firebase Storage upload failed
+        _webSocketService!.sendImageMessage(
+          imageBase64: imageBase64,
+          imageMimeType: mimeType,
+          conversationId: _currentConversationId!,
+          userName: user.username,
+          userId: user.id,
+          text: "", // Optional text can be added later
+          clientMessageId: clientMessageId,
+        );
+      }
+
+      // Log analytics event
+      final conversationType = _conversationService?.currentConversation?.type ?? 'unknown';
+      await AnalyticsService.logImageUploaded(conversationType: conversationType);
     } catch (e) {
       debugPrint('Error sending image message: $e');
       // Remove optimistic message on error (if it was created)

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
+import '../services/analytics_service.dart';
 import '../widgets/input_buttons.dart';
+import '../widgets/chat_image_widget.dart';
 
 class SimpleChatScreen extends StatefulWidget {
   const SimpleChatScreen({super.key});
@@ -18,6 +20,9 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AnalyticsService.logScreenView('chat_screen');
+    });
     // Update notification service to track current conversation
     final chatService = context.read<ChatService>();
     final notificationService = NotificationService();
@@ -182,22 +187,12 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
                       ),
                     ),
                   if (message.imageUrl != null) ...[
-                    ClipRRect(
+                    ChatImageWidget(
+                      imageUrl: message.imageUrl!,
+                      width: 200,
+                      height: 200,
+                      fit: BoxFit.cover,
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        message.imageUrl!,
-                        width: 200,
-                        height: 200,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: 200,
-                            height: 200,
-                            color: Colors.grey[300],
-                            child: const Icon(Icons.image_not_supported),
-                          );
-                        },
-                      ),
                     ),
                     const SizedBox(height: 8),
                   ],

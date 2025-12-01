@@ -4,9 +4,10 @@ import 'package:http/http.dart' as http;
 import '../models/conversation.dart';
 import '../models/chat_message.dart';
 import '../config/app_config.dart';
+import 'analytics_service.dart';
 
 class ConversationService extends ChangeNotifier {
-  static const String _baseUrl = AppConfig.backendBaseUrl;
+  static String get _baseUrl => AppConfig.backendBaseUrl;
   Conversation? _currentConversation;
   final List<Conversation> _conversations = [];
   final Map<String, String> _usernameCache = {}; // Cache for participant usernames
@@ -44,6 +45,10 @@ class ConversationService extends ChangeNotifier {
           final index = _conversations.indexWhere((c) => c.id == conversation.id);
           _conversations[index] = conversation;
         }
+
+        // Log analytics event
+        await AnalyticsService.logConversationCreated(conversationType: type);
+
         notifyListeners();
         return conversation;
       } else {
@@ -225,6 +230,10 @@ class ConversationService extends ChangeNotifier {
         } else {
           _conversations.add(conversation);
         }
+
+        // Log analytics event
+        await AnalyticsService.logGroupJoined();
+
         notifyListeners();
         return conversation;
       } else {
@@ -253,6 +262,10 @@ class ConversationService extends ChangeNotifier {
         if (index != -1) {
           _conversations[index] = conversation;
         }
+
+        // Log analytics event
+        await AnalyticsService.logGroupLeft();
+
         notifyListeners();
         return conversation;
       } else {
