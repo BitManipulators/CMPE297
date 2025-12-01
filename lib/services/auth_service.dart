@@ -6,6 +6,7 @@ import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import '../models/user.dart';
 import '../config/app_config.dart';
+import 'analytics_service.dart';
 
 class AuthService extends ChangeNotifier {
   static String get _baseUrl => AppConfig.backendBaseUrl;
@@ -166,6 +167,11 @@ class AuthService extends ChangeNotifier {
         final prefs = await SharedPreferences.getInstance();
         await prefs.setString('current_user', json.encode(userData));
 
+        // Log analytics events
+        await AnalyticsService.logLogin('google');
+        await AnalyticsService.setUserId(_currentUser!.id);
+        await AnalyticsService.setUserProperty(name: 'username', value: _currentUser!.username);
+
         notifyListeners();
         return _currentUser!;
       } else {
@@ -204,6 +210,9 @@ class AuthService extends ChangeNotifier {
     } catch (e) {
       debugPrint('Error signing out from Google: $e');
     }
+
+    // Log analytics event
+    await AnalyticsService.logEvent('user_logout', null);
 
     _currentUser = null;
     _isAuthenticated = false;

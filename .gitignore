@@ -60,3 +60,4 @@ backend/rag/__pycache__/
 .terraform*
 .terraform
 terraform.tfstate
+android/app/google-services.json

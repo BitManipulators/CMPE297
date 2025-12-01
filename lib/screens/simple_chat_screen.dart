@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
+import '../services/analytics_service.dart';
 import '../widgets/input_buttons.dart';
 import '../widgets/chat_image_widget.dart';
 
@@ -19,6 +20,9 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AnalyticsService.logScreenView('chat_screen');
+    });
     // Update notification service to track current conversation
     final chatService = context.read<ChatService>();
     final notificationService = NotificationService();

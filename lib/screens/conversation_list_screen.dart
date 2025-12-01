@@ -5,6 +5,7 @@ import '../services/conversation_service.dart';
 import '../services/websocket_service.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
+import '../services/analytics_service.dart';
 import '../models/conversation.dart';
 import '../widgets/input_buttons.dart';
 import '../widgets/chat_image_widget.dart';
@@ -27,6 +28,7 @@ class _ConversationListScreenState extends State<ConversationListScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      AnalyticsService.logScreenView('conversation_list_screen');
       _initializeServices();
     });
   }

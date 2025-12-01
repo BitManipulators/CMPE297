@@ -14,6 +14,7 @@ import 'websocket_service.dart';
 import 'conversation_service.dart';
 import 'auth_service.dart';
 import 'notification_service.dart';
+import 'analytics_service.dart';
 
 class ChatService extends ChangeNotifier {
   final List<ChatMessage> _messages = [];
@@ -598,6 +599,10 @@ class ChatService extends ChangeNotifier {
         clientMessageId: clientMessageId,
       );
 
+      // Log analytics event
+      final conversationType = _conversationService?.currentConversation?.type ?? 'unknown';
+      await AnalyticsService.logChatMessageSent(conversationType: conversationType);
+
       debugPrint('Message sent successfully: ${text.trim()}');
     } catch (e) {
       debugPrint('Error sending message: $e');
@@ -825,6 +830,10 @@ class ChatService extends ChangeNotifier {
           clientMessageId: clientMessageId,
         );
       }
+
+      // Log analytics event
+      final conversationType = _conversationService?.currentConversation?.type ?? 'unknown';
+      await AnalyticsService.logImageUploaded(conversationType: conversationType);
     } catch (e) {
       debugPrint('Error sending image message: $e');
       // Remove optimistic message on error (if it was created)
