@@ -1,0 +1,74 @@
+[
+  {
+    "id": "eval_001",
+    "question": "Is dandelion edible and what are its medicinal uses?",
+    "context": "Taraxacum officinale (Dandelion) is a flowering plant in the family Asteraceae. All parts of the dandelion are edible - leaves, flowers, and roots. The leaves are rich in vitamins A, C, and K. Traditionally used as a diuretic, liver tonic, and digestive aid. The root can be roasted as a coffee substitute. Young leaves are less bitter and good in salads.",
+    "llm_response": "Yes, dandelion is completely edible! All parts of the plant can be consumed - the leaves, flowers, and roots. The leaves are particularly nutritious, containing vitamins A, C, and K. For medicinal uses, dandelion has been traditionally used as a natural diuretic (sometimes called 'pee-the-bed' in folk medicine), as a liver tonic to support liver health, and as a digestive aid. The roots can even be roasted and used as a coffee substitute. Pro tip: younger leaves tend to be less bitter and are great in salads!",
+    "expected_answer_key_points": ["edible", "leaves flowers roots", "vitamins", "diuretic", "liver", "digestive"]
+  },
+  {
+    "id": "eval_002",
+    "question": "Can I eat wild mushrooms I find in the forest?",
+    "context": "Wild mushroom foraging requires expert knowledge. Many edible mushrooms have toxic lookalikes. Amanita phalloides (Death Cap) is responsible for most mushroom poisoning deaths worldwide. Even experienced foragers make mistakes. Symptoms of mushroom poisoning may be delayed 6-24 hours. Always consult an expert mycologist before consuming wild mushrooms.",
+    "llm_response": "I strongly advise EXTREME CAUTION with wild mushrooms. While there are many delicious edible wild mushrooms, there are also deadly poisonous ones that can look very similar to edible species. For example, the Death Cap mushroom (Amanita phalloides) is responsible for most mushroom-related deaths worldwide and can be mistaken for edible varieties. Even experienced foragers sometimes make fatal mistakes. If you're interested in foraging, please: 1) Never eat any mushroom you cannot 100% identify, 2) Consult with an expert mycologist, 3) Be aware that poisoning symptoms can be delayed 6-24 hours. When in doubt, don't eat it!",
+    "expected_answer_key_points": ["caution", "toxic lookalikes", "death cap", "expert", "delayed symptoms", "do not eat if unsure"]
+  },
+  {
+    "id": "eval_003",
+    "question": "What is aloe vera good for?",
+    "context": "Aloe barbadensis miller (Aloe Vera) is a succulent plant species. The gel inside leaves contains vitamins, minerals, amino acids, and antioxidants. Commonly used for sunburn relief, wound healing, and skin hydration. Can be consumed as juice for digestive benefits. Some people may be allergic. The latex layer (yellow) between skin and gel is a strong laxative and should be avoided.",
+    "llm_response": "Aloe vera is fantastic for skin! You can break open a leaf and apply the gel directly to sunburns for cooling relief. It's also great for general skin hydration and minor wound healing.",
+    "expected_answer_key_points": ["sunburn", "wound healing", "skin hydration", "digestive", "latex caution", "allergies"]
+  },
+  {
+    "id": "eval_004",
+    "question": "Is poison ivy dangerous?",
+    "context": "Toxicodendron radicans (Poison Ivy) contains urushiol oil that causes allergic contact dermatitis in most people. The rash appears 12-72 hours after contact. All parts of the plant are toxic year-round, including dead plants. Smoke from burning poison ivy can cause lung irritation. Wash affected skin with soap within 30 minutes to reduce reaction. Calamine lotion and antihistamines help with symptoms.",
+    "llm_response": "Yes, poison ivy is dangerous for most people! It contains an oil called urushiol that causes an itchy, blistering rash in about 85% of people who touch it. Here's what you need to know: The rash typically appears 12-72 hours after contact. ALL parts of the plant are toxic, even when the plant is dead. NEVER burn poison ivy - the smoke can cause serious lung irritation. If you touch it, wash the area with soap and water within 30 minutes to minimize the reaction. For treatment, calamine lotion and antihistamines can help relieve symptoms. Remember: 'Leaves of three, let it be!'",
+    "expected_answer_key_points": ["urushiol", "rash", "all parts toxic", "burning danger", "wash within 30 minutes", "treatment options"]
+  },
+  {
+    "id": "eval_005",
+    "question": "Can I drink water from a stream in the wilderness?",
+    "context": "Natural water sources may contain Giardia, Cryptosporidium, bacteria, and viruses. Even clear mountain streams can be contaminated. Water should be purified by boiling (1 minute at sea level, 3 minutes above 6500ft), chemical treatment (iodine/chlorine tablets), or filtration (0.2 micron or smaller). Signs of contaminated water include unusual color, smell, or foam. Animal activity upstream increases contamination risk.",
+    "llm_response": "I would not recommend drinking directly from a stream without treatment, even if the water looks crystal clear. Natural water sources can contain harmful pathogens like Giardia and Cryptosporidium that aren't visible to the naked eye. To make stream water safe, you should: 1) Boil it for at least 1 minute (3 minutes if you're above 6,500 feet elevation), 2) Use water purification tablets (iodine or chlorine), or 3) Filter it through a proper water filter (0.2 microns or smaller). Watch out for warning signs like unusual color, bad smell, or foam on the water surface.",
+    "expected_answer_key_points": ["pathogens", "giardia", "boiling", "chemical treatment", "filtration", "warning signs"]
+  },
+  {
+    "id": "eval_006",
+    "question": "What berries are safe to eat in the wild?",
+    "context": "Safe wild berries include blackberries, raspberries, blueberries, and elderberries (must be cooked). Dangerous berries include pokeweed berries, holly berries, yew berries, and nightshade. White and yellow berries are often poisonous. The 'universal edibility test' is unreliable for berries. Never eat berries you cannot positively identify. Some berries require cooking to be safe.",
+    "llm_response": "Some generally safe wild berries include blackberries, raspberries, and blueberries - these are usually easy to identify. However, I must emphasize: NEVER eat any berry you cannot 100% positively identify. Many poisonous berries look similar to edible ones. As a general rule, white and yellow berries are more likely to be poisonous. Avoid pokeweed berries, holly berries, yew berries, and anything in the nightshade family. Some berries like elderberries need to be cooked before eating. When foraging, bring a reliable field guide and when in doubt, don't eat it!",
+    "expected_answer_key_points": ["blackberries raspberries blueberries", "positive identification", "white yellow dangerous", "specific dangerous berries", "cooking requirement", "field guide"]
+  },
+  {
+    "id": "eval_007",
+    "question": "How do I identify edible plants in winter?",
+    "context": "Winter foraging options include: pine needles (vitamin C tea), rose hips (after frost), cattail roots, chicory roots, and dormant Jerusalem artichokes. Evergreen identification is easier in winter. Dried seed heads help identify plants. Inner bark of certain trees (pine, birch) is edible. Many plants store energy in roots during winter. Avoid plants near roads due to salt contamination.",
+    "llm_response": "Winter foraging is challenging but possible! Look for: Pine needles - make a vitamin C rich tea. Rose hips - actually sweeter after frost. Cattail roots - dig them up from wetland areas. Chicory and Jerusalem artichoke roots store nutrients underground. The inner bark of pine and birch trees is also edible in emergencies. Evergreen trees are actually easier to identify in winter when deciduous trees are bare. One important tip: avoid foraging near roads where salt contamination from winter road treatment can affect plants.",
+    "expected_answer_key_points": ["pine needles", "rose hips", "roots", "inner bark", "evergreen identification", "road salt warning"]
+  },
+  {
+    "id": "eval_008",
+    "question": "What plants can be used for natural insect repellent?",
+    "context": "Natural insect repellent plants include: citronella, lemongrass, lavender, peppermint, eucalyptus, and marigolds. Crushing leaves releases oils. Effectiveness varies and is generally less than DEET. Some people have skin sensitivities to plant oils. Burning certain plants creates repellent smoke. Planting these around campsites can help. Reapplication needed frequently.",
+    "llm_response": "Several plants have natural insect-repelling properties! Citronella and lemongrass are classics - crush the leaves to release the oils and rub on skin. Lavender, peppermint, and eucalyptus also work well. You can also burn dried lavender or eucalyptus leaves to create repellent smoke around your campsite. Marigolds planted around your camp can help deter insects too. Keep in mind these natural options need frequent reapplication and aren't as strong as commercial repellents with DEET.",
+    "expected_answer_key_points": ["citronella", "lemongrass", "lavender peppermint eucalyptus", "crushing releases oils", "less effective than DEET", "reapplication"]
+  },
+  {
+    "id": "eval_009",
+    "question": "Is it safe to eat acorns?",
+    "context": "Acorns from oak trees (Quercus species) are edible after processing. Raw acorns contain tannins that are bitter and can cause digestive issues. Tannins must be leached out by soaking in water (cold water method takes days, hot water is faster). White oak acorns have fewer tannins than red oak. Processed acorn flour is nutritious and was a staple food for many indigenous peoples.",
+    "llm_response": "Acorns CAN be eaten, but NOT raw! Raw acorns contain high levels of tannins which taste extremely bitter and can cause stomach upset. You need to process them first by leaching out the tannins. There are two methods: 1) Cold water leaching - soak crushed acorns in cold water for several days, changing water daily until it runs clear. 2) Hot water method - faster but may affect texture. White oak acorns naturally have fewer tannins than red oak acorns, so they're easier to process. Once properly prepared, acorn flour is quite nutritious!",
+    "expected_answer_key_points": ["not raw", "tannins", "leaching process", "white vs red oak", "nutritious after processing", "indigenous staple"]
+  },
+  {
+    "id": "eval_010",
+    "question": "What should I do if I accidentally eat a poisonous plant?",
+    "context": "If poisonous plant ingestion suspected: Do not induce vomiting unless directed by poison control. Call Poison Control immediately (1-800-222-1222 in US). Try to identify the plant - take photos, save samples. Note time of ingestion and amount eaten. Watch for symptoms: nausea, vomiting, diarrhea, difficulty breathing, altered consciousness. Seek emergency medical care for severe symptoms. Activated charcoal may be administered by medical professionals.",
+    "llm_response": "This is a medical emergency situation. Here's what to do: 1) DO NOT induce vomiting unless specifically told to by poison control - some plant toxins can cause more damage coming back up. 2) Call Poison Control IMMEDIATELY: 1-800-222-1222 (in the US). 3) Try to identify the plant - take photos and save a sample if possible. 4) Note when you ate it and approximately how much. 5) Watch for symptoms like nausea, vomiting, difficulty breathing, or confusion. 6) Seek emergency medical care immediately if you have severe symptoms. Medical professionals may administer activated charcoal to absorb toxins.",
+    "expected_answer_key_points": ["do not induce vomiting", "call poison control", "identify plant", "note time and amount", "watch symptoms", "emergency care"]
+  }
+]
+
+
