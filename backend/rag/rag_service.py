@@ -43,17 +43,11 @@ class RAGService:
         self.index_name = "plant-knowledge-base-bedrock"
         self.dimension = 1024  # Cohere embed-english-v3.0 dimension
 
-        # Local cache for plant data (keyed by scientific_name)
-        self.plant_cache: Dict[str, Dict] = {}
-
-        # Local cache for animal data (keyed by scientific_name)
-        self.animal_cache: Dict[str, Dict] = {}
+        # Cache removed - all data retrieved from Pinecone
 
         self.json_file_path = json_file_path
 
-        # Load plant data into cache if JSON file path provided
-        if json_file_path and os.path.exists(json_file_path):
-            self._load_plant_cache(json_file_path)
+        # Cache loading removed - all data comes from Pinecone
 
         # Initialize Amazon Bedrock and Pinecone
         self._initialize_bedrock()
@@ -68,13 +62,10 @@ class RAGService:
         instance.embedding_model = None
         instance.index_name = "animal-knowledge-base-bedrock"
         instance.dimension = 1024
-        instance.plant_cache = {}
-        instance.animal_cache = {}
+        # Cache removed - all data retrieved from Pinecone
         instance.json_file_path = json_file_path
 
-        # Load animal data into cache if JSON file path provided
-        if json_file_path and os.path.exists(json_file_path):
-            instance._load_animal_cache(json_file_path)
+        # Cache loading removed - all data comes from Pinecone
 
         # Initialize Amazon Bedrock and Pinecone
         instance._initialize_bedrock()
@@ -157,41 +148,6 @@ class RAGService:
             logger.error(f"Error initializing Pinecone index: {e}")
             self.index = None
 
-    def _load_plant_cache(self, json_file_path: str):
-        """Load plant data into local cache for quick retrieval"""
-        try:
-            logger.info(f"Loading plant data into cache from {json_file_path}")
-            with open(json_file_path, 'r', encoding='utf-8') as f:
-                plants = json.load(f)
-
-            for plant in plants:
-                if plant.get("error"):
-                    continue
-                scientific_name = plant.get("scientific_name", "")
-                if scientific_name:
-                    self.plant_cache[scientific_name.lower()] = plant
-
-            logger.info(f"Loaded {len(self.plant_cache)} plants into cache")
-        except Exception as e:
-            logger.error(f"Error loading plant cache: {e}")
-
-    def _load_animal_cache(self, json_file_path: str):
-        """Load animal data into local cache for quick retrieval"""
-        try:
-            logger.info(f"Loading animal data into cache from {json_file_path}")
-            with open(json_file_path, 'r', encoding='utf-8') as f:
-                animals = json.load(f)
-
-            for animal in animals:
-                if animal.get("error"):
-                    continue
-                scientific_name = animal.get("scientific_name", "")
-                if scientific_name:
-                    self.animal_cache[scientific_name.lower()] = animal
-
-            logger.info(f"Loaded {len(self.animal_cache)} animals into cache")
-        except Exception as e:
-            logger.error(f"Error loading animal cache: {e}")
 
     def _generate_embedding(self, text: str, input_type: str = "search_query") -> Optional[List[float]]:
         """
@@ -319,20 +275,24 @@ class RAGService:
         plant_id = self._sanitize_plant_id(plant.get("scientific_name", ""))
 
         # Chunk 1: Basic information
-        basic_info = f"""
+        basic_info_text = f"""
         Scientific Name: {plant.get('scientific_name', 'Unknown')}
         Common Name: {plant.get('common_name', 'Unknown')}
         Family: {plant.get('family', 'Unknown')}
         Genus: {plant.get('genus', 'Unknown')}
         Summary: {plant.get('summary', '')}
-        """
+        """.strip()
         chunks.append({
             "id": f"{plant_id}_basic",
-            "text": basic_info.strip(),
+            "text": basic_info_text,  # Used only for embedding generation (not stored in Pinecone)
             "metadata": {
                 "scientific_name": plant.get("scientific_name", ""),
                 "common_name": plant.get("common_name", ""),
                 "family": plant.get("family", ""),
+                "genus": plant.get("genus", ""),
+                "summary": plant.get("summary", ""),
+                "wikipedia_url": plant.get("wikipedia_url", ""),
+                "chunk_text": basic_info_text,  # Stored in Pinecone metadata for retrieval
                 "type": "basic_info"
             }
         })
@@ -367,10 +327,15 @@ class RAGService:
             for i, chunk_text in enumerate(content_chunks):
                 chunks.append({
                     "id": f"{plant_id}_content_{i}",
-                    "text": chunk_text,
+                    "text": chunk_text,  # Used only for embedding generation (not stored in Pinecone)
                     "metadata": {
                         "scientific_name": plant.get("scientific_name", ""),
                         "common_name": plant.get("common_name", ""),
+                        "family": plant.get("family", ""),
+                        "genus": plant.get("genus", ""),
+                        "summary": plant.get("summary", ""),
+                        "wikipedia_url": plant.get("wikipedia_url", ""),
+                        "chunk_text": chunk_text,  # Stored in Pinecone metadata for retrieval
                         "type": "detailed_content",
                         "chunk_index": i
                     }
@@ -387,7 +352,7 @@ class RAGService:
         animal_id = self._sanitize_animal_id(animal.get("scientific_name", ""))
 
         # Chunk 1: Basic information
-        basic_info = f"""
+        basic_info_text = f"""
         Scientific Name: {animal.get('scientific_name', 'Unknown')}
         Common Name: {animal.get('common_name', 'Unknown')}
         Family: {animal.get('family', 'Unknown')}
@@ -397,10 +362,10 @@ class RAGService:
         Phylum: {animal.get('phylum', 'Unknown')}
         Kingdom: {animal.get('kingdom', 'Unknown')}
         Summary: {animal.get('summary', '')}
-        """
+        """.strip()
         chunks.append({
             "id": f"{animal_id}_basic",
-            "text": basic_info.strip(),
+            "text": basic_info_text,  # Used only for embedding generation (not stored in Pinecone)
             "metadata": {
                 "scientific_name": animal.get("scientific_name", ""),
                 "common_name": animal.get("common_name", ""),
@@ -409,6 +374,10 @@ class RAGService:
                 "order": animal.get("order", ""),
                 "class": animal.get("class", ""),
                 "phylum": animal.get("phylum", ""),
+                "kingdom": animal.get("kingdom", ""),
+                "summary": animal.get("summary", ""),
+                "wikipedia_url": animal.get("wikipedia_url", ""),
+                "chunk_text": basic_info_text,  # Stored in Pinecone metadata for retrieval
                 "type": "basic_info"
             }
         })
@@ -443,10 +412,19 @@ class RAGService:
             for i, chunk_text in enumerate(content_chunks):
                 chunks.append({
                     "id": f"{animal_id}_content_{i}",
-                    "text": chunk_text,
+                    "text": chunk_text,  # Used only for embedding generation (not stored in Pinecone)
                     "metadata": {
                         "scientific_name": animal.get("scientific_name", ""),
                         "common_name": animal.get("common_name", ""),
+                        "family": animal.get("family", ""),
+                        "genus": animal.get("genus", ""),
+                        "order": animal.get("order", ""),
+                        "class": animal.get("class", ""),
+                        "phylum": animal.get("phylum", ""),
+                        "kingdom": animal.get("kingdom", ""),
+                        "summary": animal.get("summary", ""),
+                        "wikipedia_url": animal.get("wikipedia_url", ""),
+                        "chunk_text": chunk_text,  # Stored in Pinecone metadata for retrieval
                         "type": "detailed_content",
                         "chunk_index": i
                     }
@@ -464,9 +442,6 @@ class RAGService:
             logger.info(f"Loading plant data from {json_file_path}")
             with open(json_file_path, 'r', encoding='utf-8') as f:
                 plants = json.load(f)
-
-            # Also load into cache
-            self._load_plant_cache(json_file_path)
 
             logger.info(f"Loaded {len(plants)} plants. Starting indexing...")
 
@@ -528,9 +503,6 @@ class RAGService:
             logger.info(f"Loading animal data from {json_file_path}")
             with open(json_file_path, 'r', encoding='utf-8') as f:
                 animals = json.load(f)
-
-            # Also load into cache
-            self._load_animal_cache(json_file_path)
 
             logger.info(f"Loaded {len(animals)} animals. Starting indexing...")
 
@@ -604,28 +576,47 @@ class RAGService:
 
             logger.info(f"Pinecone query returned {len(results.matches)} matches")
 
-            # Format results
-            plant_info = []
-            seen_plants = set()
+            # Format results - collect all chunks for each plant
+            plant_chunks = {}  # scientific_name -> list of chunks
 
             for match in results.matches:
                 metadata = match.metadata
                 scientific_name = metadata.get("scientific_name", "")
-
-                # Avoid duplicates - prefer detailed content over basic info
-                if scientific_name in seen_plants:
+                if not scientific_name:
                     continue
+
+                if scientific_name not in plant_chunks:
+                    plant_chunks[scientific_name] = []
+
+                plant_chunks[scientific_name].append({
+                    "chunk_text": metadata.get("chunk_text", ""),
+                    "type": metadata.get("type", ""),
+                    "chunk_index": metadata.get("chunk_index", -1),
+                    "score": match.score,
+                    "metadata": metadata
+                })
+
+            # Convert to list format, keeping best score for each plant
+            plant_info = []
+            for scientific_name, chunks in plant_chunks.items():
+                # Sort by score (highest first) and get best chunk
+                chunks.sort(key=lambda x: x["score"], reverse=True)
+                best_chunk = chunks[0]
+                metadata = best_chunk["metadata"]
 
                 plant_info.append({
                     "scientific_name": scientific_name,
                     "common_name": metadata.get("common_name", ""),
                     "family": metadata.get("family", ""),
-                    "text": metadata.get("text", ""),  # This might not be in metadata
-                    "score": match.score,
+                    "genus": metadata.get("genus", ""),
+                    "summary": metadata.get("summary", ""),
+                    "wikipedia_url": metadata.get("wikipedia_url", ""),
+                    "chunk_text": best_chunk["chunk_text"],
+                    "all_chunks": chunks,  # Store all chunks for context generation
+                    "score": best_chunk["score"],
                     "metadata": metadata
                 })
-                seen_plants.add(scientific_name)
-                logger.info(f"Found match: {scientific_name} ({metadata.get('common_name', '')}) - Score: {match.score:.4f}")
+                logger.info(f"Found match: {scientific_name} ({metadata.get('common_name', '')}) - Score: {best_chunk['score']:.4f}")
 
             logger.info(f"Returning {len(plant_info)} unique plants from Pinecone")
             return plant_info
@@ -656,17 +647,33 @@ class RAGService:
 
             logger.info(f"Pinecone query returned {len(results.matches)} matches")
 
-            # Format results
-            animal_info = []
-            seen_animals = set()
+            # Format results - collect all chunks for each animal
+            animal_chunks = {}  # scientific_name -> list of chunks
 
             for match in results.matches:
                 metadata = match.metadata
                 scientific_name = metadata.get("scientific_name", "")
-
-                # Avoid duplicates - prefer detailed content over basic info
-                if scientific_name in seen_animals:
+                if not scientific_name:
                     continue
+
+                if scientific_name not in animal_chunks:
+                    animal_chunks[scientific_name] = []
+
+                animal_chunks[scientific_name].append({
+                    "chunk_text": metadata.get("chunk_text", ""),
+                    "type": metadata.get("type", ""),
+                    "chunk_index": metadata.get("chunk_index", -1),
+                    "score": match.score,
+                    "metadata": metadata
+                })
+
+            # Convert to list format, keeping best score for each animal
+            animal_info = []
+            for scientific_name, chunks in animal_chunks.items():
+                # Sort by score (highest first) and get best chunk
+                chunks.sort(key=lambda x: x["score"], reverse=True)
+                best_chunk = chunks[0]
+                metadata = best_chunk["metadata"]
 
                 animal_info.append({
                     "scientific_name": scientific_name,
@@ -676,12 +683,15 @@ class RAGService:
                     "order": metadata.get("order", ""),
                     "class": metadata.get("class", ""),
                     "phylum": metadata.get("phylum", ""),
-                    "text": metadata.get("text", ""),  # This might not be in metadata
-                    "score": match.score,
+                    "kingdom": metadata.get("kingdom", ""),
+                    "summary": metadata.get("summary", ""),
+                    "wikipedia_url": metadata.get("wikipedia_url", ""),
+                    "chunk_text": best_chunk["chunk_text"],
+                    "all_chunks": chunks,  # Store all chunks for context generation
+                    "score": best_chunk["score"],
                     "metadata": metadata
                 })
-                seen_animals.add(scientific_name)
-                logger.info(f"Found match: {scientific_name} ({metadata.get('common_name', '')}) - Score: {match.score:.4f}")
+                logger.info(f"Found match: {scientific_name} ({metadata.get('common_name', '')}) - Score: {best_chunk['score']:.4f}")
 
             logger.info(f"Returning {len(animal_info)} unique animals from Pinecone")
             return animal_info
@@ -691,8 +701,8 @@ class RAGService:
             return []
 
     def get_rag_context(self, query: str, top_k: int = 3) -> str:
-        """Get formatted RAG context for AI prompt with full plant information"""
-        results = self.search_plants(query, top_k=top_k)
+        """Get formatted RAG context for AI prompt with full plant information from Pinecone"""
+        results = self.search_plants(query, top_k=top_k * 5)  # Get more to aggregate chunks
 
         if not results:
             return ""
@@ -700,49 +710,54 @@ class RAGService:
         context_parts = []
         context_parts.append("Relevant Plant Information:")
 
-        for i, result in enumerate(results, 1):
+        for i, result in enumerate(results[:top_k], 1):
             scientific_name = result['scientific_name']
             common_name = result.get('common_name', '')
 
-            # Retrieve full plant data from cache
-            plant_data = self.plant_cache.get(scientific_name.lower())
+            context_parts.append(f"\n--- Plant {i}: {scientific_name} ({common_name}) ---")
 
-            if plant_data:
-                context_parts.append(f"\n--- Plant {i}: {scientific_name} ({common_name}) ---")
+            # Add taxonomy from metadata
+            if result.get('family'):
+                context_parts.append(f"Family: {result['family']}")
+            if result.get('genus'):
+                context_parts.append(f"Genus: {result['genus']}")
 
-                # Add taxonomy
-                if plant_data.get('family'):
-                    context_parts.append(f"Family: {plant_data['family']}")
-                if plant_data.get('genus'):
-                    context_parts.append(f"Genus: {plant_data['genus']}")
+            # Add summary from metadata
+            if result.get('summary'):
+                context_parts.append(f"Summary: {result['summary']}")
 
-                # Add summary
-                if plant_data.get('summary'):
-                    context_parts.append(f"Summary: {plant_data['summary']}")
+            # Aggregate all chunks for this plant to reconstruct content
+            all_chunks = result.get('all_chunks', [])
+            if all_chunks:
+                # Sort chunks: basic_info first, then content chunks by index
+                sorted_chunks = []
+                basic_chunk = None
+                content_chunks = []
 
-                # Add detailed content (truncate if too long)
-                if plant_data.get('content'):
-                    content = plant_data['content']
-                    # Limit content to ~2000 characters to avoid token limits
-                    if len(content) > 2000:
-                        content = content[:2000] + "... [truncated]"
-                    context_parts.append(f"Details: {content}")
+                for chunk in all_chunks:
+                    if chunk.get('type') == 'basic_info':
+                        basic_chunk = chunk
+                    else:
+                        content_chunks.append(chunk)
 
-                # Add Wikipedia URL if available
-                if plant_data.get('wikipedia_url'):
-                    context_parts.append(f"Source: {plant_data['wikipedia_url']}")
-            else:
-                # Fallback if plant not in cache
-                context_parts.append(f"\n--- Plant {i}: {scientific_name} ({common_name}) ---")
-                if result.get('family'):
-                    context_parts.append(f"Family: {result['family']}")
+                # Sort content chunks by index
+                content_chunks.sort(key=lambda x: x.get('chunk_index', 0))
+
+                # Combine all content chunks
+                if content_chunks:
+                    full_content = " ".join([chunk.get('chunk_text', '') for chunk in content_chunks])
+                    context_parts.append(f"Details: {full_content}")
+
+            # Add Wikipedia URL from metadata
+            if result.get('wikipedia_url'):
+                context_parts.append(f"Source: {result['wikipedia_url']}")
 
         context_parts.append("\n=== END OF PLANT INFORMATION ===\n")
         return "\n".join(context_parts)
 
     def get_rag_context_animals(self, query: str, top_k: int = 3) -> str:
-        """Get formatted RAG context for AI prompt with full animal information"""
-        results = self.search_animals(query, top_k=top_k)
+        """Get formatted RAG context for AI prompt with full animal information from Pinecone"""
+        results = self.search_animals(query, top_k=top_k * 5)  # Get more to aggregate chunks
 
         if not results:
             return ""
@@ -750,48 +765,51 @@ class RAGService:
         context_parts = []
         context_parts.append("Relevant Animal Information:")
 
-        for i, result in enumerate(results, 1):
+        for i, result in enumerate(results[:top_k], 1):
             scientific_name = result['scientific_name']
             common_name = result.get('common_name', '')
 
-            # Retrieve full animal data from cache
-            animal_data = self.animal_cache.get(scientific_name.lower())
+            context_parts.append(f"\n--- Animal {i}: {scientific_name} ({common_name}) ---")
 
-            if animal_data:
-                context_parts.append(f"\n--- Animal {i}: {scientific_name} ({common_name}) ---")
+            # Add taxonomy from metadata
+            if result.get('family'):
+                context_parts.append(f"Family: {result['family']}")
+            if result.get('genus'):
+                context_parts.append(f"Genus: {result['genus']}")
+            if result.get('order'):
+                context_parts.append(f"Order: {result['order']}")
+            if result.get('class'):
+                context_parts.append(f"Class: {result['class']}")
+            if result.get('phylum'):
+                context_parts.append(f"Phylum: {result['phylum']}")
+            if result.get('kingdom'):
+                context_parts.append(f"Kingdom: {result['kingdom']}")
 
-                # Add taxonomy
-                if animal_data.get('family'):
-                    context_parts.append(f"Family: {animal_data['family']}")
-                if animal_data.get('genus'):
-                    context_parts.append(f"Genus: {animal_data['genus']}")
-                if animal_data.get('order'):
-                    context_parts.append(f"Order: {animal_data['order']}")
-                if animal_data.get('class'):
-                    context_parts.append(f"Class: {animal_data['class']}")
-                if animal_data.get('phylum'):
-                    context_parts.append(f"Phylum: {animal_data['phylum']}")
+            # Add summary from metadata
+            if result.get('summary'):
+                context_parts.append(f"Summary: {result['summary']}")
 
-                # Add summary
-                if animal_data.get('summary'):
-                    context_parts.append(f"Summary: {animal_data['summary']}")
+            # Aggregate all chunks for this animal to reconstruct content
+            all_chunks = result.get('all_chunks', [])
+            if all_chunks:
+                # Sort chunks: basic_info first, then content chunks by index
+                content_chunks = []
 
-                # Add detailed content (truncate if too long)
-                if animal_data.get('content'):
-                    content = animal_data['content']
-                    # Limit content to ~2000 characters to avoid token limits
-                    if len(content) > 2000:
-                        content = content[:2000] + "... [truncated]"
-                    context_parts.append(f"Details: {content}")
+                for chunk in all_chunks:
+                    if chunk.get('type') == 'detailed_content':
+                        content_chunks.append(chunk)
 
-                # Add Wikipedia URL if available
-                if animal_data.get('wikipedia_url'):
-                    context_parts.append(f"Source: {animal_data['wikipedia_url']}")
-            else:
-                # Fallback if animal not in cache
-                context_parts.append(f"\n--- Animal {i}: {scientific_name} ({common_name}) ---")
-                if result.get('family'):
-                    context_parts.append(f"Family: {result['family']}")
+                # Sort content chunks by index
+                content_chunks.sort(key=lambda x: x.get('chunk_index', 0))
+
+                # Combine all content chunks
+                if content_chunks:
+                    full_content = " ".join([chunk.get('chunk_text', '') for chunk in content_chunks])
+                    context_parts.append(f"Details: {full_content}")
+
+            # Add Wikipedia URL from metadata
+            if result.get('wikipedia_url'):
+                context_parts.append(f"Source: {result['wikipedia_url']}")
 
         context_parts.append("\n=== END OF ANIMAL INFORMATION ===\n")
         return "\n".join(context_parts)

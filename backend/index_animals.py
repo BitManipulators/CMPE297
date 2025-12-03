@@ -100,7 +100,7 @@ def main():
     if success:
         logger.info("=" * 60)
         logger.info("SUCCESS: Animals indexed successfully!")
-        logger.info(f"Total animals cached: {len(rag_service.animal_cache)}")
+        logger.info("All animal data stored in Pinecone vector database")
         logger.info("=" * 60)
         return True
     else:

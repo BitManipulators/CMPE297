@@ -19,6 +19,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 import requests as http_requests
 import base64
+import re
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -254,7 +255,7 @@ if RAG_AVAILABLE:
 
     # Initialize Plant RAG Service
     try:
-        plant_json_path = script_dir / "rag" / "all_plants_streaming.json"
+        plant_json_path = script_dir / "rag" / "plantae_wikipedia_content.json"
         rag_service_plant = RAGService(json_file_path=str(plant_json_path) if plant_json_path.exists() else None)
         if rag_service_plant.is_available():
             logger.info("Plant RAG service initialized successfully")
@@ -402,6 +403,14 @@ class AIService:
 - Wildlife behavior, habitats, and safety information
 - Survival knowledge about both flora and fauna
 
+CRITICAL INSTRUCTION - INFORMATION SOURCING:
+You MUST ONLY use information provided in the "Relevant Plant Information" or "Relevant Animal Information" sections below.
+- DO NOT use any information from your training data or prior knowledge
+- DO NOT make up or infer information that is not explicitly stated in the provided context
+- If the provided information does not contain the answer, you MUST say "I don't have specific information about this in my knowledge base" or similar
+- You can only answer questions about plants/animals that appear in the provided context sections
+- If asked about something not in the context, politely decline and suggest the user provide more details or check other sources
+
 Your primary role is to help users learn about:
 PLANTS: Identifying plants, determining edibility, medicinal uses, safety warnings
 ANIMALS/INSECTS: Identifying species, behavior, habitats, safety (venomous/poisonous), ecological roles
@@ -419,11 +428,13 @@ ANIMALS/INSECTS:
 
 When in doubt, advise users to err on the side of caution and consult experts.
 
-Keep your responses accurate, informative, and safety-focused. Be friendly and educational."""
+Keep your responses accurate, informative, and safety-focused. Be friendly and educational.
+ALWAYS base your answers ONLY on the information provided in the context sections below."""
             prompt_parts.append(system_prompt)
 
             # Detect query intent to determine which domain(s) to search
             intent = self._detect_query_intent(user_message)
+            logger.info(f"Query intent detected: {intent} for message: '{user_message[:100]}...'")
 
             # Get RAG context based on intent
             rag_context = ""
@@ -435,11 +446,14 @@ Keep your responses accurate, informative, and safety-focused. Be friendly and e
                     # Search only relevant domain(s) based on intent
                     if intent['is_both'] or intent['is_ambiguous']:
                         # Search both domains
+                        logger.info("Searching both plant and animal RAG services")
                         if self.rag_service_plant and self.rag_service_plant.is_available():
                             plant_context = self.rag_service_plant.get_rag_context(user_message, top_k=2)
+                            logger.info(f"Plant RAG context retrieved (length: {len(plant_context)} chars):\n{plant_context[:500]}...")
 
                         if self.rag_service_animal and self.rag_service_animal.is_available():
                             animal_context = self.rag_service_animal.get_rag_context_animals(user_message, top_k=2)
+                            logger.info(f"Animal RAG context retrieved (length: {len(animal_context)} chars):\n{animal_context[:500]}...")
 
                         # Combine both contexts
                         if plant_context and animal_context:
@@ -451,19 +465,41 @@ Keep your responses accurate, informative, and safety-focused. Be friendly and e
 
                     elif intent['is_animal']:
                         # Only search animal index
+                        logger.info("Searching animal RAG service only")
                         if self.rag_service_animal and self.rag_service_animal.is_available():
                             animal_context = self.rag_service_animal.get_rag_context_animals(user_message, top_k=3)
                             rag_context = animal_context
+                            logger.info(f"Animal RAG context retrieved (length: {len(animal_context)} chars):\n{animal_context[:500]}...")
 
                     elif intent['is_plant']:
                         # Only search plant index
+                        logger.info("Searching plant RAG service only")
                         if self.rag_service_plant and self.rag_service_plant.is_available():
                             plant_context = self.rag_service_plant.get_rag_context(user_message, top_k=3)
                             rag_context = plant_context
+                            logger.info(f"Plant RAG context retrieved (length: {len(plant_context)} chars):\n{plant_context[:500]}...")
 
                     if rag_context:
-                        prompt_parts.append("\n" + rag_context)
-                        prompt_parts.append("\nUse the above information to answer the user's question. If the information is relevant, cite it. If not, you can provide general guidance but mention that specific information may not be in the knowledge base.")
+                        logger.info(f"Final RAG context (total length: {len(rag_context)} chars) will be added to prompt")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("KNOWLEDGE BASE CONTEXT - USE ONLY THIS INFORMATION:")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append(rag_context)
+                        prompt_parts.append("="*80)
+                        prompt_parts.append("\nCRITICAL INSTRUCTIONS:")
+                        prompt_parts.append("- Answer the user's question using ONLY the information provided in the 'KNOWLEDGE BASE CONTEXT' section above")
+                        prompt_parts.append("- If the answer is not in the provided context, say: 'I don't have specific information about this in my knowledge base. Please provide more details or consult other sources.'")
+                        prompt_parts.append("- DO NOT use any information from your training data that is not in the provided context")
+                        prompt_parts.append("- If you reference information, indicate it comes from the knowledge base")
+                        prompt_parts.append("- If the context is empty or doesn't contain relevant information, you must decline to answer based on prior knowledge")
+                    else:
+                        logger.warning("No RAG context retrieved for query")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("NO KNOWLEDGE BASE CONTEXT AVAILABLE")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append("\nIMPORTANT: No relevant information was found in the knowledge base for this query.")
+                        prompt_parts.append("You must inform the user that you don't have specific information about this topic in your knowledge base.")
+                        prompt_parts.append("DO NOT make up answers or use prior training knowledge.")
                 except Exception as e:
                     logger.error(f"Error getting RAG context: {e}")
 
@@ -533,81 +569,123 @@ Keep your responses accurate, informative, and safety-focused. Be friendly and e
             return "I'm sorry, but I cannot analyze images right now. Please ensure the AI service is properly configured."
 
         try:
-            # Build prompt parts
+            # STEP 1: First, identify the scientific name using LLM's visual recognition
+            scientific_name = "UNKNOWN"  # Initialize with default value
+            try:
+                logger.info("Image analysis - Step 1: Identifying scientific name from image using LLM")
+                identification_prompt = """Look at this image and identify ONLY the scientific name (binomial nomenclature) of the plant or animal shown.
+
+CRITICAL INSTRUCTIONS:
+- Provide ONLY the scientific name in the format: "Genus species" (e.g., "Azadirachta indica")
+- If you cannot identify it, respond with: "UNKNOWN"
+- Do NOT provide any other information, just the scientific name or UNKNOWN
+- If it's clearly a plant, provide the plant scientific name
+- If it's clearly an animal/insect, provide the animal scientific name
+- If uncertain, try to provide the most likely scientific name
+
+Respond with ONLY the scientific name or UNKNOWN:"""
+
+                # Prepare image for identification (Gemini accepts raw bytes)
+                image_part_identification = {
+                    "mime_type": image_mime_type,
+                    "data": image_data
+                }
+
+                # Get identification from LLM
+                loop = asyncio.get_event_loop()
+                identification_response = await loop.run_in_executor(
+                    None,
+                    lambda: self.model.generate_content([identification_prompt, image_part_identification])
+                )
+
+                scientific_name = identification_response.text.strip() if identification_response.text else "UNKNOWN"
+                # Clean up the response (remove quotes, extra text)
+                scientific_name = scientific_name.replace('"', '').replace("'", '').strip()
+                # Extract just the scientific name if LLM added extra text
+                scientific_name_match = re.search(r'([A-Z][a-z]+(?:\s+[a-z]+)+)', scientific_name)
+                if scientific_name_match:
+                    scientific_name = scientific_name_match.group(1)
+
+                logger.info(f"Image analysis - Identified scientific name: {scientific_name}")
+            except Exception as e:
+                logger.error(f"Error during scientific name identification: {e}")
+                scientific_name = "UNKNOWN"  # Fallback to UNKNOWN if identification fails
+
+            # Build prompt parts for final analysis
             prompt_parts = []
 
             # System prompt for plant and animal identification
             system_prompt = """You are an expert specializing in analyzing images of plants, animals, and insects found in the wild.
+
+CRITICAL INSTRUCTION - INFORMATION SOURCING:
+You MUST ONLY use information provided in the "Relevant Plant Information" or "Relevant Animal Information" sections below.
+- DO NOT use any information from your training data or prior knowledge for detailed information
+- DO NOT make up or infer information that is not explicitly stated in the provided context
+- The scientific name has already been identified from the image
+- You MUST use ONLY the information from the knowledge base context to answer questions
+- If the provided information does not contain details about the identified species, you MUST say "I don't have specific information about this in my knowledge base"
+
 When analyzing images, provide:
 
 FOR PLANTS:
-1. Plant name (common name and scientific name if identifiable)
+1. Plant name (common name and scientific name - already identified)
 2. Key identifying features visible in the image
-3. Edibility status (edible/poisonous/unknown) - BE VERY CAUTIOUS
-4. Safety warnings about lookalike plants or toxic parts
-5. Medicinal uses (if any and if known)
-6. Habitat and growing conditions
+3. Edibility status (edible/poisonous/unknown) - ONLY from provided context, BE VERY CAUTIOUS
+4. Safety warnings about lookalike plants or toxic parts - ONLY from provided context
+5. Medicinal uses (if any and if known) - ONLY from provided context
+6. Habitat and growing conditions - ONLY from provided context
 
 FOR ANIMALS/INSECTS:
-1. Species name (common name and scientific name if identifiable)
+1. Species name (common name and scientific name - already identified)
 2. Key identifying features visible in the image
-3. Safety status (venomous/poisonous/harmless) - BE VERY CAUTIOUS
-4. Behavior and habitat information
-5. Ecological role (beneficial/pest/predator/prey)
-6. Safety warnings about bites, stings, or dangerous encounters
+3. Safety status (venomous/poisonous/harmless) - ONLY from provided context, BE VERY CAUTIOUS
+4. Behavior and habitat information - ONLY from provided context
+5. Ecological role (beneficial/pest/predator/prey) - ONLY from provided context
+6. Safety warnings about bites, stings, or dangerous encounters - ONLY from provided context
 
 CRITICAL SAFETY GUIDELINES:
 PLANTS:
-- NEVER state a plant is edible unless you are HIGHLY confident
-- Always warn about potential lookalike toxic plants
+- NEVER state a plant is edible unless you are HIGHLY confident AND the information is in the provided context
+- Always warn about potential lookalike toxic plants (if mentioned in context)
 
 ANIMALS/INSECTS:
-- Warn about venomous, poisonous, or dangerous species
-- Distinguish between harmful and beneficial species
-- Provide safety guidelines for encounters
+- Warn about venomous, poisonous, or dangerous species (if mentioned in context)
+- Distinguish between harmful and beneficial species (if mentioned in context)
+- Provide safety guidelines for encounters (if mentioned in context)
 
 GENERAL:
 - Recommend consulting local experts or field guides
 - When in doubt, advise users to err on the side of caution
 - If the image is unclear or doesn't show a plant/animal/insect, say so
+- If the identified species is not in the knowledge base context, clearly state that you don't have information about it
 
 Be accurate, informative, and prioritize safety above all else."""
             prompt_parts.append(system_prompt)
 
-            # Detect intent from user message (if provided) or default to ambiguous
-            if user_message:
-                intent = self._detect_query_intent(user_message)
-            else:
-                intent = {
-                    'is_animal': False,
-                    'is_plant': False,
-                    'is_both': False,
-                    'is_ambiguous': True
-                }
+            # Add the identified scientific name to the prompt
+            if scientific_name and scientific_name.upper() != "UNKNOWN":
+                prompt_parts.append(f"\nIDENTIFIED SPECIES: {scientific_name}")
+                prompt_parts.append("Use the knowledge base context below to provide information about this species.")
 
-            # Get RAG context based on intent
-            if self.rag_service_plant or self.rag_service_animal:
+            # STEP 2: Search RAG using the identified scientific name
+            plant_context = ""
+            animal_context = ""
+            rag_context = ""
+
+            if scientific_name and scientific_name.upper() != "UNKNOWN" and (self.rag_service_plant or self.rag_service_animal):
                 try:
-                    query = user_message if user_message else "identification"
+                    logger.info(f"Image analysis - Step 2: Searching RAG with scientific name: {scientific_name}")
 
-                    plant_context = ""
-                    animal_context = ""
+                    # Try both plant and animal indexes with the scientific name
+                    if self.rag_service_plant and self.rag_service_plant.is_available():
+                        plant_context = self.rag_service_plant.get_rag_context(scientific_name, top_k=3)
+                        logger.info(f"Image analysis - Plant RAG context retrieved (length: {len(plant_context)} chars):\n{plant_context[:500]}...")
 
-                    if intent['is_both'] or intent['is_ambiguous']:
-                        # Search both
-                        if self.rag_service_plant and self.rag_service_plant.is_available():
-                            plant_context = self.rag_service_plant.get_rag_context(query, top_k=2)
-                        if self.rag_service_animal and self.rag_service_animal.is_available():
-                            animal_context = self.rag_service_animal.get_rag_context_animals(query, top_k=2)
-                    elif intent['is_animal']:
-                        if self.rag_service_animal and self.rag_service_animal.is_available():
-                            animal_context = self.rag_service_animal.get_rag_context_animals(query, top_k=3)
-                    elif intent['is_plant']:
-                        if self.rag_service_plant and self.rag_service_plant.is_available():
-                            plant_context = self.rag_service_plant.get_rag_context(query, top_k=3)
+                    if self.rag_service_animal and self.rag_service_animal.is_available():
+                        animal_context = self.rag_service_animal.get_rag_context_animals(scientific_name, top_k=3)
+                        logger.info(f"Image analysis - Animal RAG context retrieved (length: {len(animal_context)} chars):\n{animal_context[:500]}...")
 
                     # Combine contexts
-                    rag_context = ""
                     if plant_context and animal_context:
                         rag_context = plant_context + "\n\n" + animal_context
                     elif plant_context:
@@ -616,10 +694,43 @@ Be accurate, informative, and prioritize safety above all else."""
                         rag_context = animal_context
 
                     if rag_context:
-                        prompt_parts.append("\n" + rag_context)
-                        prompt_parts.append("\nUse the above information to enhance your analysis if relevant.")
+                        logger.info(f"Image analysis - Final RAG context (total length: {len(rag_context)} chars) will be added to prompt")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("KNOWLEDGE BASE CONTEXT - USE ONLY THIS INFORMATION:")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append(rag_context)
+                        prompt_parts.append("="*80)
+                        prompt_parts.append("\nCRITICAL INSTRUCTIONS:")
+                        prompt_parts.append("- The scientific name has been identified as: " + scientific_name)
+                        prompt_parts.append("- Use ONLY the information provided in the 'KNOWLEDGE BASE CONTEXT' section above to answer all questions")
+                        prompt_parts.append("- DO NOT use any information from your training data that is not in the provided context")
+                        prompt_parts.append("- If the identified species is not in the provided context, say: 'I can identify this as " + scientific_name + ", but I don't have specific detailed information about it in my knowledge base.'")
+                    else:
+                        logger.warning(f"Image analysis - No RAG context found for scientific name: {scientific_name}")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("NO KNOWLEDGE BASE CONTEXT AVAILABLE")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append(f"\nIMPORTANT: The species was identified as {scientific_name}, but no relevant information was found in the knowledge base for this scientific name.")
+                        prompt_parts.append("You must inform the user that you can identify the species but don't have detailed information about it in your knowledge base.")
+                        prompt_parts.append("DO NOT make up detailed answers or use prior training knowledge.")
                 except Exception as e:
                     logger.error(f"Error getting RAG context: {e}")
+            else:
+                # No RAG services available or scientific name is UNKNOWN
+                if scientific_name.upper() == "UNKNOWN":
+                    logger.warning("Image analysis - Could not identify scientific name, proceeding without RAG context")
+                    prompt_parts.append("\n" + "="*80)
+                    prompt_parts.append("NO SPECIES IDENTIFICATION")
+                    prompt_parts.append("="*80)
+                    prompt_parts.append("\nIMPORTANT: Could not identify the scientific name from the image.")
+                    prompt_parts.append("You can describe what you see in the image, but you cannot provide detailed information without identification.")
+                elif not (self.rag_service_plant or self.rag_service_animal):
+                    logger.warning("Image analysis - RAG services not available")
+                    prompt_parts.append("\n" + "="*80)
+                    prompt_parts.append("RAG SERVICES NOT AVAILABLE")
+                    prompt_parts.append("="*80)
+                    prompt_parts.append(f"\nIMPORTANT: The species was identified as {scientific_name}, but RAG services are not available.")
+                    prompt_parts.append("You must inform the user that you can identify the species but don't have detailed information available.")
 
             # Add conversation context if available
             if conversation_context:
@@ -642,7 +753,7 @@ Be accurate, informative, and prioritize safety above all else."""
 
             prompt_parts.append("Assistant:")
 
-            # Prepare image part for Gemini Vision
+            # Prepare image part for Gemini Vision (for final analysis)
             image_part = {
                 "mime_type": image_mime_type,
                 "data": image_data
@@ -737,7 +848,7 @@ async def index_plants():
     try:
         # Get the path to the plant data JSON file
         script_dir = Path(__file__).parent
-        json_file_path = script_dir / "rag" / "all_plants_streaming.json"
+        json_file_path = script_dir / "rag" / "plantae_wikipedia_content.json"
 
         if not json_file_path.exists():
             raise HTTPException(status_code=404, detail=f"Plant data file not found: {json_file_path}")
@@ -748,8 +859,7 @@ async def index_plants():
         if success:
             return {
                 "message": "Plants indexed successfully",
-                "status": "success",
-                "plants_cached": len(rag_service_plant.plant_cache)
+                "status": "success"
             }
         else:
             raise HTTPException(status_code=500, detail="Failed to index plants. Check logs for details.")
@@ -785,8 +895,7 @@ async def index_animals():
         if success:
             return {
                 "message": "Animals indexed successfully",
-                "status": "success",
-                "animals_cached": len(rag_service_animal.animal_cache)
+                "status": "success"
             }
         else:
             raise HTTPException(status_code=500, detail="Failed to index animals. Check logs for details.")
@@ -808,13 +917,13 @@ async def rag_status():
     plant_status = {
         "available": rag_service_plant.is_available() if rag_service_plant else False,
         "index_name": rag_service_plant.index_name if rag_service_plant else None,
-        "plants_cached": len(rag_service_plant.plant_cache) if rag_service_plant else 0
+        "data_source": "Pinecone vector database"
     }
 
     animal_status = {
         "available": rag_service_animal.is_available() if rag_service_animal else False,
         "index_name": rag_service_animal.index_name if rag_service_animal else None,
-        "animals_cached": len(rag_service_animal.animal_cache) if rag_service_animal else 0
+        "animals_indexed": "N/A"  # Cache removed, all data in Pinecone
     }
 
     return {
