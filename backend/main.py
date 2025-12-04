@@ -311,63 +311,128 @@ class AIService:
             if not self.model:
                 logger.error("Failed to initialize any Gemini model. AI will use fallback responses.")
 
-    def _detect_query_intent(self, query: str) -> Dict[str, bool]:
+    async def _detect_query_intent(self, query: str) -> Dict[str, bool]:
         """
-        Detect if query is about plants, animals/insects, or both.
+        Detect if query is about plants, animals/insects, or both using LLM.
         Returns dict with flags for each domain.
+        Falls back to default ambiguous classification if LLM is unavailable.
         """
-        query_lower = query.lower()
+        # If Gemini model is not available, default to ambiguous (search both)
+        if not self.model:
+            logger.warning("Gemini model not available for intent detection, defaulting to ambiguous")
+            return {
+                'is_animal': False,
+                'is_plant': False,
+                'is_both': False,
+                'is_ambiguous': True
+            }
 
-        # Animal/insect keywords (including common insect terms)
-        animal_keywords = [
-            # General animal terms
-            'animal', 'wildlife', 'creature', 'beast',
-            # Specific animal types
-            'mammal', 'bird', 'reptile', 'amphibian', 'fish',
-            # Insect-specific terms
-            'insect', 'bug', 'beetle', 'butterfly', 'moth', 'ant', 'bee',
-            'wasp', 'spider', 'arachnid', 'cricket', 'grasshopper', 'dragonfly',
-            'mosquito', 'fly', 'flea', 'tick', 'centipede', 'millipede',
-            # Animal behaviors/characteristics
-            'venomous', 'poisonous', 'bite', 'sting', 'predator', 'prey',
-            'habitat', 'nest', 'burrow', 'hive', 'colony',
-            # Animal body parts (when in context)
-            'wing', 'antenna', 'exoskeleton', 'mandible', 'proboscis'
-        ]
+        try:
+            # Construct prompt for intent classification
+            intent_prompt = f"""You are a query classifier for a wildlife knowledge base. Classify the following user query to determine if it's about animals/insects/wildlife, plants/flora, both domains, or ambiguous/unclear.
 
-        # Plant keywords
-        plant_keywords = [
-            # General plant terms
-            'plant', 'flora', 'vegetation', 'herb', 'shrub', 'tree', 'bush',
-            # Plant parts
-            'leaf', 'leaves', 'flower', 'bloom', 'petal', 'stem', 'root',
-            'bark', 'branch', 'twig', 'seed', 'fruit', 'berry', 'nut',
-            # Plant types
-            'edible', 'poisonous plant', 'medicinal', 'herb', 'mushroom',
-            'fungus', 'moss', 'fern', 'grass', 'weed',
-            # Plant characteristics
-            'photosynthesis', 'chlorophyll', 'pollen', 'nectar'
-        ]
+Query: "{query}"
 
-        # Check for animal keywords
-        is_animal = any(keyword in query_lower for keyword in animal_keywords)
+Respond with ONLY a valid JSON object in this exact format (no markdown, no code blocks, just the JSON):
+{{
+  "is_animal": true or false,
+  "is_plant": true or false,
+  "is_both": true or false,
+  "is_ambiguous": true or false
+}}
 
-        # Check for plant keywords
-        is_plant = any(keyword in query_lower for keyword in plant_keywords)
+Classification Rules:
+- If query mentions specific animals (bears, lions, birds, insects, mammals, reptiles, etc.) or animal-related terms → is_animal: true
+- If query mentions specific plants (trees, flowers, mushrooms, herbs, etc.) or plant-related terms → is_plant: true
+- If query clearly mentions both animals and plants → is_both: true, is_animal: true, is_plant: true
+- If query is unclear, too general, or could be either → is_ambiguous: true
+- Only one of is_both or is_ambiguous should be true (not both)
+- If query is clearly about animals, set is_animal: true and is_ambiguous: false
+- If query is clearly about plants, set is_plant: true and is_ambiguous: false
 
-        # Special cases: queries that might be ambiguous
-        # If query mentions both domains explicitly
-        has_both_keywords = is_animal and is_plant
+Examples:
+- "where can I find grizzly bears?" → {{"is_animal": true, "is_plant": false, "is_both": false, "is_ambiguous": false}}
+- "what plants are edible?" → {{"is_animal": false, "is_plant": true, "is_both": false, "is_ambiguous": false}}
+- "what animals and plants live in forests?" → {{"is_animal": true, "is_plant": true, "is_both": true, "is_ambiguous": false}}
+- "tell me about nature" → {{"is_animal": false, "is_plant": false, "is_both": false, "is_ambiguous": true}}
 
-        # If no clear keywords, it's ambiguous (default to searching both for safety)
-        is_ambiguous = not is_animal and not is_plant
+Now classify this query:"""
 
-        return {
-            'is_animal': is_animal,
-            'is_plant': is_plant,
-            'is_both': has_both_keywords,
-            'is_ambiguous': is_ambiguous
-        }
+            # Generate response using Gemini
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(intent_prompt)
+            )
+
+            # Extract text from response
+            response_text = response.text.strip() if response.text else ""
+
+            if not response_text:
+                logger.warning("Empty response from LLM for intent detection, defaulting to ambiguous")
+                return {
+                    'is_animal': False,
+                    'is_plant': False,
+                    'is_both': False,
+                    'is_ambiguous': True
+                }
+
+            # Clean up response text (remove markdown code blocks if present)
+            response_text = response_text.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            elif response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+
+            # Parse JSON response
+            try:
+                intent_result = json.loads(response_text)
+
+                # Validate the response structure
+                required_keys = ['is_animal', 'is_plant', 'is_both', 'is_ambiguous']
+                if not all(key in intent_result for key in required_keys):
+                    logger.warning(f"Invalid intent detection response structure: {intent_result}, defaulting to ambiguous")
+                    return {
+                        'is_animal': False,
+                        'is_plant': False,
+                        'is_both': False,
+                        'is_ambiguous': True
+                    }
+
+                # Ensure boolean values
+                intent_result = {
+                    'is_animal': bool(intent_result.get('is_animal', False)),
+                    'is_plant': bool(intent_result.get('is_plant', False)),
+                    'is_both': bool(intent_result.get('is_both', False)),
+                    'is_ambiguous': bool(intent_result.get('is_ambiguous', False))
+                }
+
+                logger.info(f"LLM intent detection result: {intent_result}")
+                return intent_result
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from LLM intent detection response: {e}")
+                logger.error(f"Response text: {response_text}")
+                # Default to ambiguous on parse error
+                return {
+                    'is_animal': False,
+                    'is_plant': False,
+                    'is_both': False,
+                    'is_ambiguous': True
+                }
+
+        except Exception as e:
+            logger.error(f"Error in LLM-based intent detection: {e}")
+            # Default to ambiguous on any error
+            return {
+                'is_animal': False,
+                'is_plant': False,
+                'is_both': False,
+                'is_ambiguous': True
+            }
 
     async def generate_response(self, user_message: str, conversation_context: List[Dict] = None) -> str:
         """
@@ -433,7 +498,7 @@ ALWAYS base your answers ONLY on the information provided in the context section
             prompt_parts.append(system_prompt)
 
             # Detect query intent to determine which domain(s) to search
-            intent = self._detect_query_intent(user_message)
+            intent = await self._detect_query_intent(user_message)
             logger.info(f"Query intent detected: {intent} for message: '{user_message[:100]}...'")
 
             # Get RAG context based on intent
