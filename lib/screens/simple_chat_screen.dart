@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import '../services/chat_service.dart';
 import '../services/notification_service.dart';
+import '../services/analytics_service.dart';
 import '../widgets/input_buttons.dart';
+import '../widgets/chat_image_widget.dart';
 
 class SimpleChatScreen extends StatefulWidget {
   const SimpleChatScreen({super.key});
@@ -18,6 +21,9 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AnalyticsService.logScreenView('chat_screen');
+    });
     // Update notification service to track current conversation
     final chatService = context.read<ChatService>();
     final notificationService = NotificationService();
@@ -182,32 +188,84 @@ class _SimpleChatScreenState extends State<SimpleChatScreen> {
                       ),
                     ),
                   if (message.imageUrl != null) ...[
-                    ClipRRect(
+                    ChatImageWidget(
+                      imageUrl: message.imageUrl!,
+                      width: 200,
+                      height: 200,
+                      fit: BoxFit.cover,
                       borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        message.imageUrl!,
-                        width: 200,
-                        height: 200,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) {
-                          return Container(
-                            width: 200,
-                            height: 200,
-                            color: Colors.grey[300],
-                            child: const Icon(Icons.image_not_supported),
-                          );
-                        },
-                      ),
                     ),
                     const SizedBox(height: 8),
                   ],
-                  Text(
-                    message.text,
-                    style: TextStyle(
-                      color: isUser ? Colors.white : Colors.black,
-                      fontSize: 16,
-                    ),
-                  ),
+                  isBot
+                      ? MarkdownBody(
+                          data: message.text,
+                          styleSheet: MarkdownStyleSheet(
+                            p: TextStyle(
+                              color: Colors.black,
+                              fontSize: 16,
+                            ),
+                            strong: TextStyle(
+                              color: Colors.black,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            em: TextStyle(
+                              color: Colors.black,
+                              fontSize: 16,
+                              fontStyle: FontStyle.italic,
+                            ),
+                            listBullet: TextStyle(
+                              color: Colors.black,
+                              fontSize: 16,
+                            ),
+                            h1: TextStyle(
+                              color: Colors.black,
+                              fontSize: 20,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            h2: TextStyle(
+                              color: Colors.black,
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            h3: TextStyle(
+                              color: Colors.black,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                            code: TextStyle(
+                              color: Colors.black87,
+                              fontSize: 14,
+                              fontFamily: 'monospace',
+                            ),
+                            codeblockDecoration: BoxDecoration(
+                              color: Colors.grey[200],
+                              borderRadius: BorderRadius.circular(4),
+                            ),
+                            blockquote: TextStyle(
+                              color: Colors.black87,
+                              fontSize: 16,
+                              fontStyle: FontStyle.italic,
+                            ),
+                            blockquoteDecoration: BoxDecoration(
+                              color: Colors.grey[100],
+                              border: Border(
+                                left: BorderSide(
+                                  color: const Color(0xFF2E7D32),
+                                  width: 4,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )
+                      : Text(
+                          message.text,
+                          style: TextStyle(
+                            color: isUser ? Colors.white : Colors.black,
+                            fontSize: 16,
+                          ),
+                        ),
                   const SizedBox(height: 4),
                   Text(
                     _formatTime(message.createdAt),

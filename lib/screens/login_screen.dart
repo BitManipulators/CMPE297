@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../services/auth_service.dart';
+import '../services/analytics_service.dart';
 import 'conversation_list_screen.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -14,6 +15,14 @@ class _LoginScreenState extends State<LoginScreen> {
   final _usernameController = TextEditingController();
   final _emailController = TextEditingController();
   bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      AnalyticsService.logScreenView('login_screen');
+    });
+  }
 
   @override
   void dispose() {

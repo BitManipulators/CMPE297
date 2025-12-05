@@ -53,8 +53,15 @@ dependencies:
   # Google Sign-In
   google_sign_in: ^6.2.1
 
+  # Firebase
+  firebase_core: ^3.6.0
+  firebase_analytics: ^11.3.3
+
   # Environment variables
   flutter_dotenv: ^5.1.0
+
+  # Markdown rendering
+  flutter_markdown: ^0.7.1
 
 dev_dependencies:
   flutter_test:

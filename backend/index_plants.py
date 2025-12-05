@@ -47,7 +47,7 @@ def main():
         return False
 
     # Initialize RAG service
-    json_file_path = script_dir / "rag" / "all_plants_streaming.json"
+    json_file_path = script_dir / "rag" / "plantae_wikipedia_content.json"
 
     if not json_file_path.exists():
         logger.error(f"Plant data file not found: {json_file_path}")
@@ -70,7 +70,7 @@ def main():
     if success:
         logger.info("=" * 60)
         logger.info("SUCCESS: Plants indexed successfully!")
-        logger.info(f"Total plants cached: {len(rag_service.plant_cache)}")
+        logger.info("All plant data stored in Pinecone vector database")
         logger.info("=" * 60)
         return True
     else:

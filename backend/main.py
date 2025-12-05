@@ -19,6 +19,7 @@ from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token
 import requests as http_requests
 import base64
+import re
 
 # Configure logging first
 logging.basicConfig(level=logging.INFO)
@@ -50,7 +51,7 @@ except ImportError as e:
 # Firebase imports
 try:
     import firebase_admin
-    from firebase_admin import credentials, firestore
+    from firebase_admin import credentials, firestore, storage
     FIREBASE_AVAILABLE = True
 except ImportError as e:
     FIREBASE_AVAILABLE = False
@@ -98,12 +99,30 @@ if FIREBASE_AVAILABLE:
         except ValueError:
             # Firebase not initialized yet, so initialize it
             import os
+            import json
             # Get the directory where this script is located
             script_dir = os.path.dirname(os.path.abspath(__file__))
             cred_path = os.path.join(script_dir, "serviceAccountKey.json")
             cred = credentials.Certificate(cred_path)
-            firebase_admin.initialize_app(cred)
-            logger.info("Firebase initialized successfully")
+
+            # Read storageBucket from the service account key file
+            storage_bucket = None
+            try:
+                with open(cred_path, 'r') as f:
+                    service_account_data = json.load(f)
+                    storage_bucket = service_account_data.get('storageBucket')
+            except Exception as e:
+                logger.warning(f"Could not read storageBucket from service account key: {e}")
+
+            # Initialize Firebase with storage bucket if available
+            if storage_bucket:
+                firebase_admin.initialize_app(cred, {
+                    'storage_bucket': storage_bucket
+                })
+                logger.info(f"Firebase initialized successfully with storage bucket: {storage_bucket}")
+            else:
+                firebase_admin.initialize_app(cred)
+                logger.info("Firebase initialized successfully (storage bucket not found in service account key)")
 
         db = firestore.client()
     except Exception as e:
@@ -227,21 +246,39 @@ async def find_conversation_by_participants(participant_ids: List[str], conversa
         return None
 
 
-# Initialize RAG Service
-rag_service = None
+# Initialize RAG Services (Plant and Animal)
+rag_service_plant = None
+rag_service_animal = None
+
 if RAG_AVAILABLE:
+    script_dir = Path(__file__).parent
+
+    # Initialize Plant RAG Service
     try:
-        # Get the path to the plant data JSON file
-        script_dir = Path(__file__).parent
-        json_file_path = script_dir / "rag" / "all_plants_streaming.json"
-        rag_service = RAGService(json_file_path=str(json_file_path) if json_file_path.exists() else None)
-        if rag_service.is_available():
-            logger.info("RAG service initialized successfully")
+        plant_json_path = script_dir / "rag" / "plantae_wikipedia_content.json"
+        rag_service_plant = RAGService(json_file_path=str(plant_json_path) if plant_json_path.exists() else None)
+        if rag_service_plant.is_available():
+            logger.info("Plant RAG service initialized successfully")
         else:
-            logger.warning("RAG service initialized but not fully available (missing API keys)")
+            logger.warning("Plant RAG service initialized but not fully available (missing API keys)")
     except Exception as e:
-        logger.error(f"Failed to initialize RAG service: {e}")
-        rag_service = None
+        logger.error(f"Failed to initialize Plant RAG service: {e}")
+        rag_service_plant = None
+
+    # Initialize Animal RAG Service
+    try:
+        animal_json_path = script_dir / "rag" / "animalia_wikipedia_content.json"
+        if animal_json_path.exists():
+            rag_service_animal = RAGService.for_animals(json_file_path=str(animal_json_path))
+            if rag_service_animal.is_available():
+                logger.info("Animal RAG service initialized successfully")
+            else:
+                logger.warning("Animal RAG service initialized but not fully available (missing API keys)")
+        else:
+            logger.warning(f"Animal data file not found: {animal_json_path}")
+    except Exception as e:
+        logger.error(f"Failed to initialize Animal RAG service: {e}")
+        rag_service_animal = None
 
 # AI Service (shared AI for all users)
 class AIService:
@@ -251,7 +288,8 @@ class AIService:
         """Initialize the AI service with Gemini model"""
         self.model = None
         self.model_name = None
-        self.rag_service = rag_service
+        self.rag_service_plant = rag_service_plant
+        self.rag_service_animal = rag_service_animal
         if GEMINI_AVAILABLE and gemini_api_key:
             # Try different model names in order of preference
             # gemini-1.5-flash is faster and more cost-effective
@@ -272,6 +310,129 @@ class AIService:
 
             if not self.model:
                 logger.error("Failed to initialize any Gemini model. AI will use fallback responses.")
+
+    async def _detect_query_intent(self, query: str) -> Dict[str, bool]:
+        """
+        Detect if query is about plants, animals/insects, or both using LLM.
+        Returns dict with flags for each domain.
+        Falls back to default ambiguous classification if LLM is unavailable.
+        """
+        # If Gemini model is not available, default to ambiguous (search both)
+        if not self.model:
+            logger.warning("Gemini model not available for intent detection, defaulting to ambiguous")
+            return {
+                'is_animal': False,
+                'is_plant': False,
+                'is_both': False,
+                'is_ambiguous': True
+            }
+
+        try:
+            # Construct prompt for intent classification
+            intent_prompt = f"""You are a query classifier for a wildlife knowledge base. Classify the following user query to determine if it's about animals/insects/wildlife, plants/flora, both domains, or ambiguous/unclear.
+
+Query: "{query}"
+
+Respond with ONLY a valid JSON object in this exact format (no markdown, no code blocks, just the JSON):
+{{
+  "is_animal": true or false,
+  "is_plant": true or false,
+  "is_both": true or false,
+  "is_ambiguous": true or false
+}}
+
+Classification Rules:
+- If query mentions specific animals (bears, lions, birds, insects, mammals, reptiles, etc.) or animal-related terms → is_animal: true
+- If query mentions specific plants (trees, flowers, mushrooms, herbs, etc.) or plant-related terms → is_plant: true
+- If query clearly mentions both animals and plants → is_both: true, is_animal: true, is_plant: true
+- If query is unclear, too general, or could be either → is_ambiguous: true
+- Only one of is_both or is_ambiguous should be true (not both)
+- If query is clearly about animals, set is_animal: true and is_ambiguous: false
+- If query is clearly about plants, set is_plant: true and is_ambiguous: false
+
+Examples:
+- "where can I find grizzly bears?" → {{"is_animal": true, "is_plant": false, "is_both": false, "is_ambiguous": false}}
+- "what plants are edible?" → {{"is_animal": false, "is_plant": true, "is_both": false, "is_ambiguous": false}}
+- "what animals and plants live in forests?" → {{"is_animal": true, "is_plant": true, "is_both": true, "is_ambiguous": false}}
+- "tell me about nature" → {{"is_animal": false, "is_plant": false, "is_both": false, "is_ambiguous": true}}
+
+Now classify this query:"""
+
+            # Generate response using Gemini
+            loop = asyncio.get_event_loop()
+            response = await loop.run_in_executor(
+                None,
+                lambda: self.model.generate_content(intent_prompt)
+            )
+
+            # Extract text from response
+            response_text = response.text.strip() if response.text else ""
+
+            if not response_text:
+                logger.warning("Empty response from LLM for intent detection, defaulting to ambiguous")
+                return {
+                    'is_animal': False,
+                    'is_plant': False,
+                    'is_both': False,
+                    'is_ambiguous': True
+                }
+
+            # Clean up response text (remove markdown code blocks if present)
+            response_text = response_text.strip()
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            elif response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+
+            # Parse JSON response
+            try:
+                intent_result = json.loads(response_text)
+
+                # Validate the response structure
+                required_keys = ['is_animal', 'is_plant', 'is_both', 'is_ambiguous']
+                if not all(key in intent_result for key in required_keys):
+                    logger.warning(f"Invalid intent detection response structure: {intent_result}, defaulting to ambiguous")
+                    return {
+                        'is_animal': False,
+                        'is_plant': False,
+                        'is_both': False,
+                        'is_ambiguous': True
+                    }
+
+                # Ensure boolean values
+                intent_result = {
+                    'is_animal': bool(intent_result.get('is_animal', False)),
+                    'is_plant': bool(intent_result.get('is_plant', False)),
+                    'is_both': bool(intent_result.get('is_both', False)),
+                    'is_ambiguous': bool(intent_result.get('is_ambiguous', False))
+                }
+
+                logger.info(f"LLM intent detection result: {intent_result}")
+                return intent_result
+
+            except json.JSONDecodeError as e:
+                logger.error(f"Failed to parse JSON from LLM intent detection response: {e}")
+                logger.error(f"Response text: {response_text}")
+                # Default to ambiguous on parse error
+                return {
+                    'is_animal': False,
+                    'is_plant': False,
+                    'is_both': False,
+                    'is_ambiguous': True
+                }
+
+        except Exception as e:
+            logger.error(f"Error in LLM-based intent detection: {e}")
+            # Default to ambiguous on any error
+            return {
+                'is_animal': False,
+                'is_plant': False,
+                'is_both': False,
+                'is_ambiguous': True
+            }
 
     async def generate_response(self, user_message: str, conversation_context: List[Dict] = None) -> str:
         """
@@ -300,32 +461,110 @@ class AIService:
             # Build conversation history for context
             prompt_parts = []
 
-            # Add system context for plant identification and information
-            system_prompt = """You are a helpful AI assistant specialized in plant identification, edibility, medicinal uses, and outdoor plant knowledge.
-Your primary role is to help users learn about plants they find in the wild, including:
-- Identifying plants by their characteristics
-- Determining if plants are edible or poisonous
-- Explaining medicinal uses and traditional applications
-- Providing safety warnings about toxic plants
-- Sharing information about plant habitats, growth patterns, and uses
+            # Add system context for plant and animal identification and information
+            system_prompt = """You are a helpful AI assistant specialized in:
+- Plant identification, edibility, medicinal uses, and outdoor plant knowledge
+- Animal identification (including insects, mammals, birds, reptiles, etc.)
+- Wildlife behavior, habitats, and safety information
+- Survival knowledge about both flora and fauna
+
+CRITICAL INSTRUCTION - INFORMATION SOURCING:
+You MUST ONLY use information provided in the "Relevant Plant Information" or "Relevant Animal Information" sections below.
+- DO NOT use any information from your training data or prior knowledge
+- DO NOT make up or infer information that is not explicitly stated in the provided context
+- If the provided information does not contain the answer, you MUST say "I don't have specific information about this in my knowledge base" or similar
+- You can only answer questions about plants/animals that appear in the provided context sections
+- If asked about something not in the context, politely decline and suggest the user provide more details or check other sources
+
+Your primary role is to help users learn about:
+PLANTS: Identifying plants, determining edibility, medicinal uses, safety warnings
+ANIMALS/INSECTS: Identifying species, behavior, habitats, safety (venomous/poisonous), ecological roles
 
 IMPORTANT SAFETY GUIDELINES:
+PLANTS:
 - Always emphasize that users should NEVER consume plants without 100% certainty of identification
 - Warn about lookalike plants that might be toxic
 - Recommend consulting with local experts or field guides
-- When in doubt, advise users to err on the side of caution
 
-Keep your responses accurate, informative, and safety-focused. Be friendly and educational."""
+ANIMALS/INSECTS:
+- Warn about venomous, poisonous, or dangerous species
+- Provide safety guidelines for encounters
+- Distinguish between harmful and beneficial species (e.g., beneficial insects vs pests)
+
+When in doubt, advise users to err on the side of caution and consult experts.
+
+Keep your responses accurate, informative, and safety-focused. Be friendly and educational.
+ALWAYS base your answers ONLY on the information provided in the context sections below."""
             prompt_parts.append(system_prompt)
 
-            # Get RAG context if available
+            # Detect query intent to determine which domain(s) to search
+            intent = await self._detect_query_intent(user_message)
+            logger.info(f"Query intent detected: {intent} for message: '{user_message[:100]}...'")
+
+            # Get RAG context based on intent
             rag_context = ""
-            if self.rag_service and self.rag_service.is_available():
+            if self.rag_service_plant or self.rag_service_animal:
                 try:
-                    rag_context = self.rag_service.get_rag_context(user_message, top_k=3)
+                    plant_context = ""
+                    animal_context = ""
+
+                    # Search only relevant domain(s) based on intent
+                    if intent['is_both'] or intent['is_ambiguous']:
+                        # Search both domains
+                        logger.info("Searching both plant and animal RAG services")
+                        if self.rag_service_plant and self.rag_service_plant.is_available():
+                            plant_context = self.rag_service_plant.get_rag_context(user_message, top_k=2)
+                            logger.info(f"Plant RAG context retrieved (length: {len(plant_context)} chars):\n{plant_context[:500]}...")
+
+                        if self.rag_service_animal and self.rag_service_animal.is_available():
+                            animal_context = self.rag_service_animal.get_rag_context_animals(user_message, top_k=2)
+                            logger.info(f"Animal RAG context retrieved (length: {len(animal_context)} chars):\n{animal_context[:500]}...")
+
+                        # Combine both contexts
+                        if plant_context and animal_context:
+                            rag_context = plant_context + "\n\n" + animal_context
+                        elif plant_context:
+                            rag_context = plant_context
+                        elif animal_context:
+                            rag_context = animal_context
+
+                    elif intent['is_animal']:
+                        # Only search animal index
+                        logger.info("Searching animal RAG service only")
+                        if self.rag_service_animal and self.rag_service_animal.is_available():
+                            animal_context = self.rag_service_animal.get_rag_context_animals(user_message, top_k=3)
+                            rag_context = animal_context
+                            logger.info(f"Animal RAG context retrieved (length: {len(animal_context)} chars):\n{animal_context[:500]}...")
+
+                    elif intent['is_plant']:
+                        # Only search plant index
+                        logger.info("Searching plant RAG service only")
+                        if self.rag_service_plant and self.rag_service_plant.is_available():
+                            plant_context = self.rag_service_plant.get_rag_context(user_message, top_k=3)
+                            rag_context = plant_context
+                            logger.info(f"Plant RAG context retrieved (length: {len(plant_context)} chars):\n{plant_context[:500]}...")
+
                     if rag_context:
-                        prompt_parts.append("\n" + rag_context)
-                        prompt_parts.append("\nUse the above plant information to answer the user's question. If the information is relevant, cite it. If not, you can provide general guidance but mention that specific information about that plant may not be in the knowledge base.")
+                        logger.info(f"Final RAG context (total length: {len(rag_context)} chars) will be added to prompt")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("KNOWLEDGE BASE CONTEXT - USE ONLY THIS INFORMATION:")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append(rag_context)
+                        prompt_parts.append("="*80)
+                        prompt_parts.append("\nCRITICAL INSTRUCTIONS:")
+                        prompt_parts.append("- Answer the user's question using ONLY the information provided in the 'KNOWLEDGE BASE CONTEXT' section above")
+                        prompt_parts.append("- If the answer is not in the provided context, say: 'I don't have specific information about this in my knowledge base. Please provide more details or consult other sources.'")
+                        prompt_parts.append("- DO NOT use any information from your training data that is not in the provided context")
+                        prompt_parts.append("- If you reference information, indicate it comes from the knowledge base")
+                        prompt_parts.append("- If the context is empty or doesn't contain relevant information, you must decline to answer based on prior knowledge")
+                    else:
+                        logger.warning("No RAG context retrieved for query")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("NO KNOWLEDGE BASE CONTEXT AVAILABLE")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append("\nIMPORTANT: No relevant information was found in the knowledge base for this query.")
+                        prompt_parts.append("You must inform the user that you don't have specific information about this topic in your knowledge base.")
+                        prompt_parts.append("DO NOT make up answers or use prior training knowledge.")
                 except Exception as e:
                     logger.error(f"Error getting RAG context: {e}")
 
@@ -377,7 +616,7 @@ Keep your responses accurate, informative, and safety-focused. Be friendly and e
             # Fallback response on error
             return f"I apologize, but I encountered an error processing your message. Please try again. Your message was: {user_message[:100]}"
 
-    async def analyze_plant_image(self, image_data: bytes, image_mime_type: str, user_message: str = "", conversation_context: List[Dict] = None) -> str:
+    async def analyze_image(self, image_data: bytes, image_mime_type: str, user_message: str = "", conversation_context: List[Dict] = None) -> str:
         """
         Analyze plant image using Gemini Vision API (using gemini-2.5-flash).
 
@@ -395,40 +634,168 @@ Keep your responses accurate, informative, and safety-focused. Be friendly and e
             return "I'm sorry, but I cannot analyze images right now. Please ensure the AI service is properly configured."
 
         try:
-            # Build prompt parts
+            # STEP 1: First, identify the scientific name using LLM's visual recognition
+            scientific_name = "UNKNOWN"  # Initialize with default value
+            try:
+                logger.info("Image analysis - Step 1: Identifying scientific name from image using LLM")
+                identification_prompt = """Look at this image and identify ONLY the scientific name (binomial nomenclature) of the plant or animal shown.
+
+CRITICAL INSTRUCTIONS:
+- Provide ONLY the scientific name in the format: "Genus species" (e.g., "Azadirachta indica")
+- If you cannot identify it, respond with: "UNKNOWN"
+- Do NOT provide any other information, just the scientific name or UNKNOWN
+- If it's clearly a plant, provide the plant scientific name
+- If it's clearly an animal/insect, provide the animal scientific name
+- If uncertain, try to provide the most likely scientific name
+
+Respond with ONLY the scientific name or UNKNOWN:"""
+
+                # Prepare image for identification (Gemini accepts raw bytes)
+                image_part_identification = {
+                    "mime_type": image_mime_type,
+                    "data": image_data
+                }
+
+                # Get identification from LLM
+                loop = asyncio.get_event_loop()
+                identification_response = await loop.run_in_executor(
+                    None,
+                    lambda: self.model.generate_content([identification_prompt, image_part_identification])
+                )
+
+                scientific_name = identification_response.text.strip() if identification_response.text else "UNKNOWN"
+                # Clean up the response (remove quotes, extra text)
+                scientific_name = scientific_name.replace('"', '').replace("'", '').strip()
+                # Extract just the scientific name if LLM added extra text
+                scientific_name_match = re.search(r'([A-Z][a-z]+(?:\s+[a-z]+)+)', scientific_name)
+                if scientific_name_match:
+                    scientific_name = scientific_name_match.group(1)
+
+                logger.info(f"Image analysis - Identified scientific name: {scientific_name}")
+            except Exception as e:
+                logger.error(f"Error during scientific name identification: {e}")
+                scientific_name = "UNKNOWN"  # Fallback to UNKNOWN if identification fails
+
+            # Build prompt parts for final analysis
             prompt_parts = []
 
-            # System prompt for plant identification
-            system_prompt = """You are a plant identification expert specializing in analyzing images of plants found in the wild.
-When analyzing plant images, provide:
-1. Plant name (common name and scientific name if identifiable)
+            # System prompt for plant and animal identification
+            system_prompt = """You are an expert specializing in analyzing images of plants, animals, and insects found in the wild.
+
+CRITICAL INSTRUCTION - INFORMATION SOURCING:
+You MUST ONLY use information provided in the "Relevant Plant Information" or "Relevant Animal Information" sections below.
+- DO NOT use any information from your training data or prior knowledge for detailed information
+- DO NOT make up or infer information that is not explicitly stated in the provided context
+- The scientific name has already been identified from the image
+- You MUST use ONLY the information from the knowledge base context to answer questions
+- If the provided information does not contain details about the identified species, you MUST say "I don't have specific information about this in my knowledge base"
+
+When analyzing images, provide:
+
+FOR PLANTS:
+1. Plant name (common name and scientific name - already identified)
 2. Key identifying features visible in the image
-3. Edibility status (edible/poisonous/unknown) - BE VERY CAUTIOUS
-4. Safety warnings about lookalike plants or toxic parts
-5. Medicinal uses (if any and if known)
-6. Habitat and growing conditions
-7. Any other relevant information
+3. Edibility status (edible/poisonous/unknown) - ONLY from provided context, BE VERY CAUTIOUS
+4. Safety warnings about lookalike plants or toxic parts - ONLY from provided context
+5. Medicinal uses (if any and if known) - ONLY from provided context
+6. Habitat and growing conditions - ONLY from provided context
+
+FOR ANIMALS/INSECTS:
+1. Species name (common name and scientific name - already identified)
+2. Key identifying features visible in the image
+3. Safety status (venomous/poisonous/harmless) - ONLY from provided context, BE VERY CAUTIOUS
+4. Behavior and habitat information - ONLY from provided context
+5. Ecological role (beneficial/pest/predator/prey) - ONLY from provided context
+6. Safety warnings about bites, stings, or dangerous encounters - ONLY from provided context
 
 CRITICAL SAFETY GUIDELINES:
-- NEVER state a plant is edible unless you are HIGHLY confident
-- Always warn about potential lookalike toxic plants
+PLANTS:
+- NEVER state a plant is edible unless you are HIGHLY confident AND the information is in the provided context
+- Always warn about potential lookalike toxic plants (if mentioned in context)
+
+ANIMALS/INSECTS:
+- Warn about venomous, poisonous, or dangerous species (if mentioned in context)
+- Distinguish between harmful and beneficial species (if mentioned in context)
+- Provide safety guidelines for encounters (if mentioned in context)
+
+GENERAL:
 - Recommend consulting local experts or field guides
 - When in doubt, advise users to err on the side of caution
-- If the image is unclear or doesn't show a plant, say so
+- If the image is unclear or doesn't show a plant/animal/insect, say so
+- If the identified species is not in the knowledge base context, clearly state that you don't have information about it
 
 Be accurate, informative, and prioritize safety above all else."""
             prompt_parts.append(system_prompt)
 
-            # Get RAG context if available
-            if self.rag_service and self.rag_service.is_available():
+            # Add the identified scientific name to the prompt
+            if scientific_name and scientific_name.upper() != "UNKNOWN":
+                prompt_parts.append(f"\nIDENTIFIED SPECIES: {scientific_name}")
+                prompt_parts.append("Use the knowledge base context below to provide information about this species.")
+
+            # STEP 2: Search RAG using the identified scientific name
+            plant_context = ""
+            animal_context = ""
+            rag_context = ""
+
+            if scientific_name and scientific_name.upper() != "UNKNOWN" and (self.rag_service_plant or self.rag_service_animal):
                 try:
-                    query = user_message if user_message else "plant identification"
-                    rag_context = self.rag_service.get_rag_context(query, top_k=3)
+                    logger.info(f"Image analysis - Step 2: Searching RAG with scientific name: {scientific_name}")
+
+                    # Try both plant and animal indexes with the scientific name
+                    if self.rag_service_plant and self.rag_service_plant.is_available():
+                        plant_context = self.rag_service_plant.get_rag_context(scientific_name, top_k=3)
+                        logger.info(f"Image analysis - Plant RAG context retrieved (length: {len(plant_context)} chars):\n{plant_context[:500]}...")
+
+                    if self.rag_service_animal and self.rag_service_animal.is_available():
+                        animal_context = self.rag_service_animal.get_rag_context_animals(scientific_name, top_k=3)
+                        logger.info(f"Image analysis - Animal RAG context retrieved (length: {len(animal_context)} chars):\n{animal_context[:500]}...")
+
+                    # Combine contexts
+                    if plant_context and animal_context:
+                        rag_context = plant_context + "\n\n" + animal_context
+                    elif plant_context:
+                        rag_context = plant_context
+                    elif animal_context:
+                        rag_context = animal_context
+
                     if rag_context:
-                        prompt_parts.append("\n" + rag_context)
-                        prompt_parts.append("\nUse the above plant information to enhance your analysis if relevant.")
+                        logger.info(f"Image analysis - Final RAG context (total length: {len(rag_context)} chars) will be added to prompt")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("KNOWLEDGE BASE CONTEXT - USE ONLY THIS INFORMATION:")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append(rag_context)
+                        prompt_parts.append("="*80)
+                        prompt_parts.append("\nCRITICAL INSTRUCTIONS:")
+                        prompt_parts.append("- The scientific name has been identified as: " + scientific_name)
+                        prompt_parts.append("- Use ONLY the information provided in the 'KNOWLEDGE BASE CONTEXT' section above to answer all questions")
+                        prompt_parts.append("- DO NOT use any information from your training data that is not in the provided context")
+                        prompt_parts.append("- If the identified species is not in the provided context, say: 'I can identify this as " + scientific_name + ", but I don't have specific detailed information about it in my knowledge base.'")
+                    else:
+                        logger.warning(f"Image analysis - No RAG context found for scientific name: {scientific_name}")
+                        prompt_parts.append("\n" + "="*80)
+                        prompt_parts.append("NO KNOWLEDGE BASE CONTEXT AVAILABLE")
+                        prompt_parts.append("="*80)
+                        prompt_parts.append(f"\nIMPORTANT: The species was identified as {scientific_name}, but no relevant information was found in the knowledge base for this scientific name.")
+                        prompt_parts.append("You must inform the user that you can identify the species but don't have detailed information about it in your knowledge base.")
+                        prompt_parts.append("DO NOT make up detailed answers or use prior training knowledge.")
                 except Exception as e:
                     logger.error(f"Error getting RAG context: {e}")
+            else:
+                # No RAG services available or scientific name is UNKNOWN
+                if scientific_name.upper() == "UNKNOWN":
+                    logger.warning("Image analysis - Could not identify scientific name, proceeding without RAG context")
+                    prompt_parts.append("\n" + "="*80)
+                    prompt_parts.append("NO SPECIES IDENTIFICATION")
+                    prompt_parts.append("="*80)
+                    prompt_parts.append("\nIMPORTANT: Could not identify the scientific name from the image.")
+                    prompt_parts.append("You can describe what you see in the image, but you cannot provide detailed information without identification.")
+                elif not (self.rag_service_plant or self.rag_service_animal):
+                    logger.warning("Image analysis - RAG services not available")
+                    prompt_parts.append("\n" + "="*80)
+                    prompt_parts.append("RAG SERVICES NOT AVAILABLE")
+                    prompt_parts.append("="*80)
+                    prompt_parts.append(f"\nIMPORTANT: The species was identified as {scientific_name}, but RAG services are not available.")
+                    prompt_parts.append("You must inform the user that you can identify the species but don't have detailed information available.")
 
             # Add conversation context if available
             if conversation_context:
@@ -447,11 +814,11 @@ Be accurate, informative, and prioritize safety above all else."""
             if user_message:
                 prompt_parts.append(f"User: {user_message}")
             else:
-                prompt_parts.append("User: Please identify this plant and provide information about it.")
+                prompt_parts.append("User: Please identify this plant, animal, or insect and provide information about it.")
 
             prompt_parts.append("Assistant:")
 
-            # Prepare image part for Gemini Vision
+            # Prepare image part for Gemini Vision (for final analysis)
             image_part = {
                 "mime_type": image_mime_type,
                 "data": image_data
@@ -470,12 +837,12 @@ Be accurate, informative, and prioritize safety above all else."""
             # Extract text from response
             ai_response = response.text.strip() if response.text else "I'm sorry, I couldn't analyze this image. Please try again."
 
-            logger.info(f"Generated plant image analysis response")
+            logger.info(f"Generated image analysis response")
             return ai_response
 
         except Exception as e:
             error_msg = str(e)
-            logger.error(f"Error analyzing plant image: {e}")
+            logger.error(f"Error analyzing image: {e}")
 
             if "404" in error_msg or "not found" in error_msg.lower():
                 logger.error(f"Model '{self.model_name}' not available for vision. Please check your API key permissions.")
@@ -534,10 +901,10 @@ async def root():
 @app.post("/api/rag/index-plants")
 async def index_plants():
     """Index plant data from JSON into Pinecone vector database"""
-    if not RAG_AVAILABLE or not rag_service:
+    if not RAG_AVAILABLE or not rag_service_plant:
         raise HTTPException(status_code=503, detail="RAG service not available")
 
-    if not rag_service.is_available():
+    if not rag_service_plant.is_available():
         raise HTTPException(
             status_code=503,
             detail="RAG service not fully configured. Please set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and PINECONE_API_KEY environment variables."
@@ -546,19 +913,18 @@ async def index_plants():
     try:
         # Get the path to the plant data JSON file
         script_dir = Path(__file__).parent
-        json_file_path = script_dir / "rag" / "all_plants_streaming.json"
+        json_file_path = script_dir / "rag" / "plantae_wikipedia_content.json"
 
         if not json_file_path.exists():
             raise HTTPException(status_code=404, detail=f"Plant data file not found: {json_file_path}")
 
         logger.info("Starting plant indexing process...")
-        success = rag_service.load_and_index_plants(str(json_file_path))
+        success = rag_service_plant.load_and_index_plants(str(json_file_path))
 
         if success:
             return {
                 "message": "Plants indexed successfully",
-                "status": "success",
-                "plants_cached": len(rag_service.plant_cache)
+                "status": "success"
             }
         else:
             raise HTTPException(status_code=500, detail="Failed to index plants. Check logs for details.")
@@ -568,62 +934,128 @@ async def index_plants():
         raise HTTPException(status_code=500, detail=f"Error indexing plants: {str(e)}")
 
 
+@app.post("/api/rag/index-animals")
+async def index_animals():
+    """Index animal data from JSON into Pinecone vector database"""
+    if not RAG_AVAILABLE or not rag_service_animal:
+        raise HTTPException(status_code=503, detail="Animal RAG service not available")
+
+    if not rag_service_animal.is_available():
+        raise HTTPException(
+            status_code=503,
+            detail="RAG service not fully configured. Please set AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, and PINECONE_API_KEY environment variables."
+        )
+
+    try:
+        # Get the path to the animal data JSON file
+        script_dir = Path(__file__).parent
+        json_file_path = script_dir / "rag" / "animalia_wikipedia_content.json"
+
+        if not json_file_path.exists():
+            raise HTTPException(status_code=404, detail=f"Animal data file not found: {json_file_path}")
+
+        logger.info("Starting animal indexing process...")
+        success = rag_service_animal.load_and_index_animals(str(json_file_path))
+
+        if success:
+            return {
+                "message": "Animals indexed successfully",
+                "status": "success"
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to index animals. Check logs for details.")
+
+    except Exception as e:
+        logger.error(f"Error indexing animals: {e}")
+        raise HTTPException(status_code=500, detail=f"Error indexing animals: {str(e)}")
+
+
 @app.get("/api/rag/status")
 async def rag_status():
-    """Get RAG service status"""
-    if not RAG_AVAILABLE or not rag_service:
+    """Get RAG service status for both plant and animal services"""
+    if not RAG_AVAILABLE:
         return {
             "available": False,
             "message": "RAG service not available"
         }
 
+    plant_status = {
+        "available": rag_service_plant.is_available() if rag_service_plant else False,
+        "index_name": rag_service_plant.index_name if rag_service_plant else None,
+        "data_source": "Pinecone vector database"
+    }
+
+    animal_status = {
+        "available": rag_service_animal.is_available() if rag_service_animal else False,
+        "index_name": rag_service_animal.index_name if rag_service_animal else None,
+        "animals_indexed": "N/A"  # Cache removed, all data in Pinecone
+    }
+
     return {
-        "available": rag_service.is_available(),
-        "index_name": rag_service.index_name if rag_service else None,
-        "plants_cached": len(rag_service.plant_cache) if rag_service else 0,
-        "message": "RAG service is ready" if rag_service.is_available() else "RAG service not fully configured"
+        "plant": plant_status,
+        "animal": animal_status,
+        "message": "RAG services status"
     }
 
 @app.get("/api/rag/test")
 async def test_rag():
-    """Test RAG service connectivity"""
+    """Test RAG service connectivity for both plant and animal services"""
     results = {
         "bedrock": {
             "available": False,
             "model": None,
             "test_embedding": None
         },
-        "pinecone": {
+        "pinecone_plant": {
+            "available": False,
+            "index_name": None,
+            "vector_count": None
+        },
+        "pinecone_animal": {
             "available": False,
             "index_name": None,
             "vector_count": None
         }
     }
 
-    # Test Bedrock
-    if rag_service and rag_service.bedrock_runtime:
+    # Test Bedrock (using plant service as reference, both use same Bedrock)
+    test_service = rag_service_plant or rag_service_animal
+    if test_service and test_service.bedrock_runtime:
         try:
-            test_embedding = rag_service._generate_embedding("test", input_type="search_query")
+            test_embedding = test_service._generate_embedding("test", input_type="search_query")
             results["bedrock"] = {
                 "available": True,
-                "model": rag_service.embedding_model,
+                "model": test_service.embedding_model,
                 "test_embedding": f"Generated ({len(test_embedding)} dimensions)" if test_embedding else "Failed"
             }
         except Exception as e:
             results["bedrock"]["error"] = str(e)
 
-    # Test Pinecone
-    if rag_service and rag_service.index:
+    # Test Pinecone Plant Index
+    if rag_service_plant and rag_service_plant.index:
         try:
-            stats = rag_service.index.describe_index_stats()
-            results["pinecone"] = {
+            stats = rag_service_plant.index.describe_index_stats()
+            results["pinecone_plant"] = {
                 "available": True,
-                "index_name": rag_service.index_name,
+                "index_name": rag_service_plant.index_name,
                 "vector_count": stats.total_vector_count,
                 "dimension": stats.dimension
             }
         except Exception as e:
-            results["pinecone"]["error"] = str(e)
+            results["pinecone_plant"]["error"] = str(e)
+
+    # Test Pinecone Animal Index
+    if rag_service_animal and rag_service_animal.index:
+        try:
+            stats = rag_service_animal.index.describe_index_stats()
+            results["pinecone_animal"] = {
+                "available": True,
+                "index_name": rag_service_animal.index_name,
+                "vector_count": stats.total_vector_count,
+                "dimension": stats.dimension
+            }
+        except Exception as e:
+            results["pinecone_animal"]["error"] = str(e)
 
     return results
 
@@ -834,6 +1266,61 @@ async def get_messages_endpoint(conversation_id: str, limit: int = 50):
     """Get messages for a conversation"""
     messages = await get_messages(conversation_id, limit)
     return {"messages": messages}
+
+
+@app.post("/api/images/upload")
+async def upload_image(
+    imageBase64: str = Body(..., description="Base64 encoded image"),
+    imageMimeType: str = Body(..., description="MIME type of the image (e.g., image/jpeg)"),
+    conversationId: str = Body(..., description="Conversation ID for organizing images")
+):
+    """Upload image to Firebase Storage and return download URL"""
+    try:
+        # Decode base64 image
+        image_data = base64.b64decode(imageBase64)
+
+        # Generate unique filename
+        file_extension = "jpg"
+        if "png" in imageMimeType:
+            file_extension = "png"
+        elif "webp" in imageMimeType:
+            file_extension = "webp"
+        elif "gif" in imageMimeType:
+            file_extension = "gif"
+
+        filename = f"chat_images/{conversationId}/{uuid.uuid4()}.{file_extension}"
+
+        if FIREBASE_AVAILABLE and db:
+            try:
+                # Get Firebase Storage bucket
+                bucket = storage.bucket()
+                blob = bucket.blob(filename)
+
+                # Upload image data
+                blob.upload_from_string(image_data, content_type=imageMimeType)
+
+                # Make the blob publicly accessible
+                blob.make_public()
+
+                # Get public URL
+                image_url = blob.public_url
+
+                logger.info(f"Image uploaded successfully: {filename}")
+                return {"imageUrl": image_url, "success": True}
+            except Exception as e:
+                logger.error(f"Firebase Storage upload failed: {e}")
+                # Fallback: return data URL if Firebase Storage fails
+                data_url = f"data:{imageMimeType};base64,{imageBase64}"
+                return {"imageUrl": data_url, "success": False, "error": str(e)}
+        else:
+            # Fallback: return data URL if Firebase not available
+            logger.warning("Firebase Storage not available, returning data URL")
+            data_url = f"data:{imageMimeType};base64,{imageBase64}"
+            return {"imageUrl": data_url, "success": False, "error": "Firebase Storage not configured"}
+
+    except Exception as e:
+        logger.error(f"Image upload error: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to upload image: {str(e)}")
 
 
 @app.get("/api/conversations")
@@ -1120,14 +1607,15 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
             elif message_type == "send_image":
                 # Handle image message
                 conversation_id = data.get("conversationId")
-                image_base64 = data.get("imageBase64")
+                image_url = data.get("imageUrl")  # Preferred: Firebase Storage URL
+                image_base64 = data.get("imageBase64")  # Fallback: base64 data
                 image_mime_type = data.get("imageMimeType", "image/jpeg")
                 user_message = data.get("text", "").strip()  # Optional text with image
 
-                if not image_base64 or not conversation_id:
+                if not conversation_id:
                     await manager.send_personal_message({
                         "type": "error",
-                        "message": "Image data and conversation ID are required"
+                        "message": "Conversation ID is required"
                     }, user_id)
                     continue
 
@@ -1147,20 +1635,75 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                     continue
 
                 try:
-                    # Decode base64 image
-                    image_data = base64.b64decode(image_base64)
+                    # If imageUrl is provided, use it directly (already uploaded to Firebase Storage)
+                    # Otherwise, if imageBase64 is provided, upload it first
+                    if image_url:
+                        # Image already uploaded, use the provided URL
+                        final_image_url = image_url
+                    elif image_base64:
+                        # Upload base64 image to Firebase Storage
+                        try:
+                            # Decode base64 image
+                            image_data = base64.b64decode(image_base64)
 
-                    # Create image message
+                            # Generate unique filename
+                            file_extension = "jpg"
+                            if "png" in image_mime_type:
+                                file_extension = "png"
+                            elif "webp" in image_mime_type:
+                                file_extension = "webp"
+                            elif "gif" in image_mime_type:
+                                file_extension = "gif"
+
+                            filename = f"chat_images/{conversation_id}/{uuid.uuid4()}.{file_extension}"
+
+                            if FIREBASE_AVAILABLE and db:
+                                try:
+                                    # Get Firebase Storage bucket
+                                    bucket = storage.bucket()
+                                    blob = bucket.blob(filename)
+
+                                    # Upload image data
+                                    blob.upload_from_string(image_data, content_type=image_mime_type)
+
+                                    # Make the blob publicly accessible
+                                    blob.make_public()
+
+                                    # Get public URL
+                                    final_image_url = blob.public_url
+                                    logger.info(f"Image uploaded to Firebase Storage: {filename}")
+                                except Exception as e:
+                                    logger.error(f"Firebase Storage upload failed: {e}")
+                                    # Fallback to data URL
+                                    final_image_url = f"data:{image_mime_type};base64,{image_base64}"
+                            else:
+                                # Fallback to data URL if Firebase not available
+                                final_image_url = f"data:{image_mime_type};base64,{image_base64}"
+                        except Exception as e:
+                            logger.error(f"Error processing image: {e}")
+                            await manager.send_personal_message({
+                                "type": "error",
+                                "message": f"Failed to process image: {str(e)}"
+                            }, user_id)
+                            continue
+                    else:
+                        await manager.send_personal_message({
+                            "type": "error",
+                            "message": "Either imageUrl or imageBase64 is required"
+                        }, user_id)
+                        continue
+
+                    # Create image message with Firebase Storage URL or data URL
                     image_message = {
                         "id": str(uuid.uuid4()),
-                        "text": user_message if user_message else "📷 Plant image",
+                        "text": user_message if user_message else "📷 Image",
                         "userId": user_id,
                         "userName": data.get("userName", "User"),
                         "conversationId": conversation_id,
                         "createdAt": datetime.utcnow().isoformat(),
                         "isBot": False,
                         "type": "image",
-                        "imageUrl": f"data:{image_mime_type};base64,{image_base64[:100]}..."  # Truncated for storage
+                        "imageUrl": final_image_url  # Firebase Storage URL or data URL fallback
                     }
 
                     # Include clientMessageId if provided
@@ -1190,7 +1733,7 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                         recent_messages = await get_messages(conversation_id, limit=10)
 
                         # Analyze image with Gemini Vision
-                        analysis_text = await ai_service.analyze_plant_image(
+                        analysis_text = await ai_service.analyze_image(
                             image_data=image_data,
                             image_mime_type=image_mime_type,
                             user_message=user_message if user_message else "",
