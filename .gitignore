@@ -62,3 +62,6 @@ backend/rag/__pycache__/
 .terraform
 terraform.tfstate
 android/app/google-services.json
+
+#wandb
+backend/evaluation/wandb/
