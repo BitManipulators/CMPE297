@@ -4,6 +4,7 @@ import 'package:mockito/mockito.dart';
 import 'package:into_the_wild/services/chat_service.dart';
 import 'package:into_the_wild/models/chat_message.dart';
 import 'package:into_the_wild/models/user.dart';
+import 'package:into_the_wild/models/conversation.dart';
 
 import '../mocks.mocks.dart';
 
@@ -21,7 +22,7 @@ void main() {
       return null;
     },
   );
-  
+
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(
     const MethodChannel('dexterous.com/flutter/local_notifications'),
@@ -139,10 +140,20 @@ void main() {
       test('should create optimistic message with clientMessageId', () async {
         // Set up WebSocket as connected
         when(mockWebSocketService.isConnected).thenReturn(true);
-        
+
         // Load conversation first
         await service.loadConversation('conv1');
-        
+
+        // Stub currentConversation for analytics
+        when(mockConversationService.currentConversation).thenReturn(
+          Conversation(
+            id: 'conv1',
+            type: 'group',
+            participants: ['user12345678'],
+            createdAt: '2025-01-01T00:00:00.000Z',
+          ),
+        );
+
         when(mockWebSocketService.sendMessage(
           text: anyNamed('text'),
           conversationId: anyNamed('conversationId'),
@@ -159,10 +170,20 @@ void main() {
       test('should send message via WebSocket', () async {
         // Set up WebSocket as connected
         when(mockWebSocketService.isConnected).thenReturn(true);
-        
+
         // Load conversation first
         await service.loadConversation('conv1');
-        
+
+        // Stub currentConversation for analytics
+        when(mockConversationService.currentConversation).thenReturn(
+          Conversation(
+            id: 'conv1',
+            type: 'group',
+            participants: ['user12345678'],
+            createdAt: '2025-01-01T00:00:00.000Z',
+          ),
+        );
+
         when(mockWebSocketService.sendMessage(
           text: anyNamed('text'),
           conversationId: anyNamed('conversationId'),
@@ -185,10 +206,20 @@ void main() {
       test('should notify listeners after sending', () async {
         // Set up WebSocket as connected
         when(mockWebSocketService.isConnected).thenReturn(true);
-        
+
         // Load conversation first
         await service.loadConversation('conv1');
-        
+
+        // Stub currentConversation for analytics
+        when(mockConversationService.currentConversation).thenReturn(
+          Conversation(
+            id: 'conv1',
+            type: 'group',
+            participants: ['user12345678'],
+            createdAt: '2025-01-01T00:00:00.000Z',
+          ),
+        );
+
         when(mockWebSocketService.sendMessage(
           text: anyNamed('text'),
           conversationId: anyNamed('conversationId'),
