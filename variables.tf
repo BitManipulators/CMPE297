@@ -55,3 +55,13 @@ variable "cloudflare_zone_id" {
   description = "The Zone ID of your domain from Cloudflare Dashboard"
   type        = string
 }
+
+variable "backend_base_url" {
+  description = "The URL of the backend for the web service"
+  type        = string
+}
+
+variable "websocket_base_url" {
+  description = "The URL of the websocket for the web service"
+  type        = string
+}

@@ -69,7 +69,13 @@ except ImportError as e:
     RAG_AVAILABLE = False
     logger.warning(f"RAG service not available. Import error: {e}")
 
-app = FastAPI(title="IntoTheWild Chat API")
+# Set the path that NGINX is stripping off
+BACKEND_ROOT_PATH = "/backend"
+
+app = FastAPI(
+    title="IntoTheWild Chat API",
+    root_path=BACKEND_ROOT_PATH
+)
 
 # CORS middleware
 app.add_middleware(

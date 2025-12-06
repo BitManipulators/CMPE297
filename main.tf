@@ -207,7 +207,7 @@ resource "kubernetes_ingress_v1" "main_ingress" {
       "kubernetes.io/ingress.class" = "nginx"
 
       # Rewrite logic for the API
-      # This strips "/api" from the request before sending it to FastAPI
+      # This strips "/backend" from the request before sending it to FastAPI
       "nginx.ingress.kubernetes.io/rewrite-target" = "/$2"
       "nginx.ingress.kubernetes.io/use-regex"      = "true"
 
@@ -241,7 +241,7 @@ resource "kubernetes_ingress_v1" "main_ingress" {
 
         # --- BACKEND ROUTE ---
         path {
-          path      = "/api(/|$)(.*)"
+          path      = "/backend(/|$)(.*)"
           path_type = "ImplementationSpecific"
           backend {
             # MAKE SURE THIS MATCHES YOUR K8S SERVICE NAME FOR FASTAPI
@@ -284,18 +284,23 @@ resource "aws_ecr_repository" "fastapi_backend" {
 # 8. Build & Push Flutter Image
 # ---------------------------------------------------------
 resource "docker_image" "flutter_image" {
-  name = "${aws_ecr_repository.flutter_app.repository_url}:v1"
+  name = "${aws_ecr_repository.flutter_app.repository_url}:latest"
 
   build {
     # Path to the folder containing the Flutter Dockerfile
     context = "./" 
     dockerfile = "Dockerfile"
     platform = "linux/amd64" 
+
+    build_args = {
+      BACKEND_BASE_URL_ARG = var.backend_base_url
+      WEBSOCKET_BASE_URL_ARG = var.websocket_base_url
+    }
   }
 
   # This ensures the image is rebuilt if files change
   triggers = {
-    dir_sha1 = sha1(join("", [for f in fileset("./lib", "**") : filesha1("./lib/${f}")]))
+    dir_sha1 = sha1(join("", [for f in fileset("./lib", "**") : filesha1("./lib/${f}")], [filesha1("./Dockerfile")]))
   }
 }
 
@@ -306,6 +311,32 @@ resource "docker_registry_image" "flutter_push" {
   # Wait for the build to finish
   triggers = {
     image_sha1 = docker_image.flutter_image.repo_digest
+  }
+}
+
+# A null_resource that executes the docker build command verbosely.
+# This is purely for displaying the output during 'terraform apply' execution.
+resource "null_resource" "verbose_flutter_docker_build" {
+  triggers = {
+    dir_sha1           = sha1(join("", [for f in fileset("./lib", "**") : filesha1("./lib/${f}")], [filesha1("./Dockerfile")]))
+  }
+
+  provisioner "local-exec" {
+    # The command runs docker build with the same arguments as the docker_image resource.
+    command = <<-EOT
+      echo "--- STARTING VERBOSE DOCKER BUILD FOR DEBUGGING ---"
+      docker build \
+        --platform linux/amd64 \
+        --tag ${aws_ecr_repository.flutter_app.repository_url}:latest \
+        --file Dockerfile \
+        --build-arg BACKEND_BASE_URL_ARG=${var.backend_base_url} \
+        --build-arg WEBSOCKET_BASE_URL_ARG=${var.websocket_base_url} \
+        ./
+      echo "--- VERBOSE DOCKER BUILD COMPLETE ---"
+    EOT
+
+    # Setting the interpreter to bash helps with multiline commands
+    interpreter = ["bash", "-c"] 
   }
 }
 
@@ -342,7 +373,7 @@ resource "kubernetes_deployment_v1" "flutter_frontend" {
         container {
           name  = "flutter-web-ui"
           # Dynamically grab the ECR URL we created earlier + the tag
-          image = "${aws_ecr_repository.flutter_app.repository_url}:v1"
+          image = docker_image.flutter_image.repo_digest
 
           # Always pull the latest version of the tag (useful for dev)
           image_pull_policy = "Always"
@@ -396,7 +427,7 @@ resource "kubernetes_service_v1" "flutter_frontend" {
 # 11. Build & Push FastAPI Image
 # ---------------------------------------------------------
 resource "docker_image" "fastapi_image" {
-  name = "${aws_ecr_repository.fastapi_backend.repository_url}:v1"
+  name = "${aws_ecr_repository.fastapi_backend.repository_url}:latest"
 
   build {
     # Path to the folder containing the FastAPI Dockerfile
@@ -434,8 +465,8 @@ resource "kubernetes_deployment_v1" "fastapi_backend" {
   }
 
   spec {
-    replicas = 3 # High Availability Not Yet Supported
-    #replicas = 2 # High Availability
+    replicas = 1 # High Availability Not Yet Supported
+    #replicas = 3 # High Availability
 
     selector {
       match_labels = {
@@ -453,15 +484,14 @@ resource "kubernetes_deployment_v1" "fastapi_backend" {
       spec {
         container {
           name  = "fastapi-server"
-          # Use the repository URL from the resource above
-          image = "${aws_ecr_repository.fastapi_backend.repository_url}:v1"
+          image = docker_image.fastapi_image.repo_digest
           image_pull_policy = "Always"
 
           port {
             container_port = 8001
           }
 
-          # Environment Variables for Google SSO (if needed)
+          # Environment Variables for Google SSO
           env {
             name  = "GOOGLE_CLIENT_ID"
             value = "your-google-client-id"
