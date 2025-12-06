@@ -790,15 +790,17 @@ class MockWebSocketService extends _i1.Mock implements _i16.WebSocketService {
 
   @override
   void sendImageMessage({
-    required String? imageBase64,
-    required String? imageMimeType,
-    required String? conversationId,
-    required String? userName,
-    required String? userId,
-    String? text = '',
+    String? imageUrl,
+    String? imageBase64,
+    String? imageMimeType,
+    required String conversationId,
+    required String userName,
+    required String userId,
+    String text = "",
     String? clientMessageId,
   }) => super.noSuchMethod(
     Invocation.method(#sendImageMessage, [], {
+      #imageUrl: imageUrl,
       #imageBase64: imageBase64,
       #imageMimeType: imageMimeType,
       #conversationId: conversationId,
