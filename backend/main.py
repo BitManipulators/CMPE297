@@ -472,9 +472,17 @@ CRITICAL INSTRUCTION - INFORMATION SOURCING:
 You MUST ONLY use information provided in the "Relevant Plant Information" or "Relevant Animal Information" sections below.
 - DO NOT use any information from your training data or prior knowledge
 - DO NOT make up or infer information that is not explicitly stated in the provided context
-- If the provided information does not contain the answer, you MUST say "I don't have specific information about this in my knowledge base" or similar
+- If the provided information does not contain the answer, you MUST say "I don't have specific information about this" or similar
 - You can only answer questions about plants/animals that appear in the provided context sections
 - If asked about something not in the context, politely decline and suggest the user provide more details or check other sources
+
+CRITICAL RESPONSE FORMATTING:
+- DO NOT start responses with phrases like "Based on the information I have", "Based on the information in my knowledge base", "According to my knowledge base", "Based on the provided information", or any similar prefacing phrases
+- DO NOT mention "knowledge base", "information I have", "provided information", or similar phrases in your responses
+- Start your responses directly with the answer or information
+- Answer naturally as if you are an expert sharing knowledge directly
+- Example of what NOT to say: "Based on the information I have, here are some plants..."
+- Example of what TO say: "Here are some plants that can be used for natural insect repellent:"
 
 Your primary role is to help users learn about:
 PLANTS: Identifying plants, determining edibility, medicinal uses, safety warnings
@@ -553,18 +561,21 @@ ALWAYS base your answers ONLY on the information provided in the context section
                         prompt_parts.append("="*80)
                         prompt_parts.append("\nCRITICAL INSTRUCTIONS:")
                         prompt_parts.append("- Answer the user's question using ONLY the information provided in the 'KNOWLEDGE BASE CONTEXT' section above")
-                        prompt_parts.append("- If the answer is not in the provided context, say: 'I don't have specific information about this in my knowledge base. Please provide more details or consult other sources.'")
+                        prompt_parts.append("- If the answer is not in the provided context, say: 'I don't have specific information about this. Please provide more details or consult other sources.'")
                         prompt_parts.append("- DO NOT use any information from your training data that is not in the provided context")
-                        prompt_parts.append("- If you reference information, indicate it comes from the knowledge base")
+                        prompt_parts.append("- DO NOT start responses with phrases like 'Based on the information I have', 'Based on the information in my knowledge base', 'According to my knowledge base', 'Based on the provided information', or any similar prefacing phrases")
+                        prompt_parts.append("- DO NOT mention 'knowledge base', 'information I have', 'provided information', or similar phrases in your responses")
+                        prompt_parts.append("- Start your responses directly with the answer or information - answer naturally as if you are an expert sharing knowledge directly")
                         prompt_parts.append("- If the context is empty or doesn't contain relevant information, you must decline to answer based on prior knowledge")
                     else:
                         logger.warning("No RAG context retrieved for query")
                         prompt_parts.append("\n" + "="*80)
                         prompt_parts.append("NO KNOWLEDGE BASE CONTEXT AVAILABLE")
                         prompt_parts.append("="*80)
-                        prompt_parts.append("\nIMPORTANT: No relevant information was found in the knowledge base for this query.")
-                        prompt_parts.append("You must inform the user that you don't have specific information about this topic in your knowledge base.")
+                        prompt_parts.append("\nIMPORTANT: No relevant information was found for this query.")
+                        prompt_parts.append("You must inform the user that you don't have specific information about this topic.")
                         prompt_parts.append("DO NOT make up answers or use prior training knowledge.")
+                        prompt_parts.append("Answer naturally without mentioning 'knowledge base' or similar phrases.")
                 except Exception as e:
                     logger.error(f"Error getting RAG context: {e}")
 
@@ -687,8 +698,14 @@ You MUST ONLY use information provided in the "Relevant Plant Information" or "R
 - DO NOT use any information from your training data or prior knowledge for detailed information
 - DO NOT make up or infer information that is not explicitly stated in the provided context
 - The scientific name has already been identified from the image
-- You MUST use ONLY the information from the knowledge base context to answer questions
-- If the provided information does not contain details about the identified species, you MUST say "I don't have specific information about this in my knowledge base"
+- You MUST use ONLY the information from the provided context to answer questions
+- If the provided information does not contain details about the identified species, you MUST say "I don't have specific information about this"
+
+CRITICAL RESPONSE FORMATTING:
+- DO NOT start responses with phrases like "Based on the information I have", "Based on the information in my knowledge base", "According to my knowledge base", "Based on the provided information", or any similar prefacing phrases
+- DO NOT mention "knowledge base", "information I have", "provided information", or similar phrases in your responses
+- Start your responses directly with the answer or information
+- Answer naturally as if you are an expert sharing knowledge directly
 
 When analyzing images, provide:
 
@@ -722,7 +739,8 @@ GENERAL:
 - Recommend consulting local experts or field guides
 - When in doubt, advise users to err on the side of caution
 - If the image is unclear or doesn't show a plant/animal/insect, say so
-- If the identified species is not in the knowledge base context, clearly state that you don't have information about it
+- If the identified species is not in the provided context, clearly state that you don't have information about it
+- Answer naturally without mentioning "knowledge base" or similar phrases
 
 Be accurate, informative, and prioritize safety above all else."""
             prompt_parts.append(system_prompt)
@@ -730,7 +748,7 @@ Be accurate, informative, and prioritize safety above all else."""
             # Add the identified scientific name to the prompt
             if scientific_name and scientific_name.upper() != "UNKNOWN":
                 prompt_parts.append(f"\nIDENTIFIED SPECIES: {scientific_name}")
-                prompt_parts.append("Use the knowledge base context below to provide information about this species.")
+                prompt_parts.append("Use the provided context below to provide information about this species.")
 
             # STEP 2: Search RAG using the identified scientific name
             plant_context = ""
@@ -769,15 +787,19 @@ Be accurate, informative, and prioritize safety above all else."""
                         prompt_parts.append("- The scientific name has been identified as: " + scientific_name)
                         prompt_parts.append("- Use ONLY the information provided in the 'KNOWLEDGE BASE CONTEXT' section above to answer all questions")
                         prompt_parts.append("- DO NOT use any information from your training data that is not in the provided context")
-                        prompt_parts.append("- If the identified species is not in the provided context, say: 'I can identify this as " + scientific_name + ", but I don't have specific detailed information about it in my knowledge base.'")
+                        prompt_parts.append("- If the identified species is not in the provided context, say: 'I can identify this as " + scientific_name + ", but I don't have specific detailed information about it.'")
+                        prompt_parts.append("- DO NOT start responses with phrases like 'Based on the information I have', 'Based on the information in my knowledge base', 'According to my knowledge base', 'Based on the provided information', or any similar prefacing phrases")
+                        prompt_parts.append("- DO NOT mention 'knowledge base', 'information I have', 'provided information', or similar phrases in your responses")
+                        prompt_parts.append("- Start your responses directly with the answer or information - answer naturally as if you are an expert sharing knowledge directly")
                     else:
                         logger.warning(f"Image analysis - No RAG context found for scientific name: {scientific_name}")
                         prompt_parts.append("\n" + "="*80)
                         prompt_parts.append("NO KNOWLEDGE BASE CONTEXT AVAILABLE")
                         prompt_parts.append("="*80)
-                        prompt_parts.append(f"\nIMPORTANT: The species was identified as {scientific_name}, but no relevant information was found in the knowledge base for this scientific name.")
-                        prompt_parts.append("You must inform the user that you can identify the species but don't have detailed information about it in your knowledge base.")
+                        prompt_parts.append(f"\nIMPORTANT: The species was identified as {scientific_name}, but no relevant information was found for this scientific name.")
+                        prompt_parts.append("You must inform the user that you can identify the species but don't have detailed information about it.")
                         prompt_parts.append("DO NOT make up detailed answers or use prior training knowledge.")
+                        prompt_parts.append("Answer naturally without mentioning 'knowledge base' or similar phrases.")
                 except Exception as e:
                     logger.error(f"Error getting RAG context: {e}")
             else:
