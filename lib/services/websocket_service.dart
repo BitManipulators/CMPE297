@@ -14,6 +14,12 @@ class WebSocketService extends ChangeNotifier {
   StreamSubscription<dynamic>? _streamSubscription;
   Future<void>? _connectingFuture; // Lock to prevent concurrent connections
 
+
+  Timer? _pingTimer;
+  DateTime? _lastPongReceived;
+  static const Duration _pingInterval = Duration(seconds: 30);
+  static const Duration _pongTimeout = Duration(seconds: 10);
+
   bool get isConnected => _isConnected;
   Stream<Map<String, dynamic>>? get messageStream => _messageController?.stream;
 
@@ -79,16 +85,43 @@ class WebSocketService extends ChangeNotifier {
       // Wait a bit to ensure connection is established
       await Future.delayed(const Duration(milliseconds: 100));
 
-      _isConnected = true;
+     _isConnected = true;
+      _lastPongReceived = DateTime.now();
       notifyListeners();
       debugPrint('WebSocket connected successfully for user: $userId');
 
-      // Listen for messages (stream is now guaranteed to be fresh)
+      // Start ping monitoring
+      _startPingMonitoring();
+
+      // Listen for messages
       _streamSubscription = _channel!.stream.listen(
         (message) {
           try {
             final data = json.decode(message);
-            debugPrint('WebSocket message received: ${data['type']}');
+            final messageType = data['type'] as String?;
+
+            debugPrint('WebSocket message received: $messageType');
+
+            // Handle ping from server - send pong back
+            if (messageType == 'ping') {
+              _sendPong();
+              return;
+            }
+
+            // Handle pong from server (if you implement client-side ping)
+            if (messageType == 'pong') {
+              _lastPongReceived = DateTime.now();
+              debugPrint('Pong received from server');
+              return;
+            }
+
+            // Handle pong_ack from server (acknowledgment that server received our pong)
+            if (messageType == 'pong_ack') {
+              _lastPongReceived = DateTime.now();
+              debugPrint('Pong acknowledgment received from server');
+              return;
+            }
+
             _messageController?.add(data);
           } catch (e) {
             debugPrint('Error parsing WebSocket message: $e');
@@ -97,11 +130,13 @@ class WebSocketService extends ChangeNotifier {
         },
         onError: (error) {
           debugPrint('WebSocket stream error: $error');
+          _stopPingMonitoring();
           _isConnected = false;
           notifyListeners();
         },
         onDone: () {
           debugPrint('WebSocket connection closed');
+          _stopPingMonitoring();
           _isConnected = false;
           _streamSubscription = null;
           notifyListeners();
@@ -117,6 +152,80 @@ class WebSocketService extends ChangeNotifier {
     }
   }
 
+  void _startPingMonitoring() {
+    _stopPingMonitoring(); // Clear any existing timer
+
+    _pingTimer = Timer.periodic(_pingInterval, (timer) {
+      if (!_isConnected) {
+        timer.cancel();
+        return;
+      }
+
+      // Check if we've received a pong recently
+      if (_lastPongReceived != null) {
+        final timeSinceLastPong = DateTime.now().difference(_lastPongReceived!);
+        if (timeSinceLastPong > _pongTimeout + _pingInterval) {
+          debugPrint('No pong received for ${timeSinceLastPong.inSeconds}s - connection may be dead');
+          // Optionally reconnect here
+          _handleDeadConnection();
+          return;
+        }
+      }
+    });
+  }
+
+  void _stopPingMonitoring() {
+    _pingTimer?.cancel();
+    _pingTimer = null;
+  }
+
+  void _sendPong() {
+    if (!_isConnected || _channel == null) {
+      return;
+    }
+
+    try {
+      final message = {
+        'type': 'pong',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      _channel!.sink.add(json.encode(message));
+      debugPrint('Pong sent to server');
+    } catch (e) {
+      debugPrint('Error sending pong: $e');
+    }
+  }
+
+  void _sendPing() {
+    if (!_isConnected || _channel == null) {
+      return;
+    }
+
+    try {
+      final message = {
+        'type': 'ping',
+        'timestamp': DateTime.now().toIso8601String(),
+      };
+      _channel!.sink.add(json.encode(message));
+      debugPrint('Ping sent to server');
+    } catch (e) {
+      debugPrint('Error sending ping: $e');
+    }
+  }
+
+  void _handleDeadConnection() {
+    debugPrint('Handling dead connection - attempting reconnect');
+    final currentUserId = _userId;
+    disconnect();
+
+    // Optionally auto-reconnect
+    if (currentUserId != null) {
+      Future.delayed(const Duration(seconds: 2), () {
+        connect(currentUserId);
+      });
+    }
+  }
+
   Future<void> disconnect() async {
     await _streamSubscription?.cancel();
     _streamSubscription = null;
@@ -126,6 +235,7 @@ class WebSocketService extends ChangeNotifier {
     _messageController = null;
     _isConnected = false;
     _userId = null;
+    _lastPongReceived = null;
     notifyListeners();
   }
 

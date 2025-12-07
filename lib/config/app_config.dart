@@ -4,7 +4,7 @@ import 'platform_helper.dart' if (dart.library.html) 'platform_helper_stub.dart'
 
 class AppConfig {
   // Backend server URL
-  // Use 10.0.2.2 for Android emulator (maps to host machine's localhost)
+  // Use production URL for Android devices
   // Use localhost for web and other platforms
   static String get backendBaseUrl {
     // On web, always use localhost
