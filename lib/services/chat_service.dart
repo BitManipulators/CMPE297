@@ -786,7 +786,7 @@ class ChatService extends ChangeNotifier {
       // Create optimistic message with Firebase Storage URL or data URL fallback
       imageMessage = ChatMessage(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
-        text: "📷 Plant image",
+        text: "Image shared",
         createdAt: DateTime.now(),
         isUser: true,
         imageUrl: firebaseImageUrl, // Firebase Storage URL or data URL fallback

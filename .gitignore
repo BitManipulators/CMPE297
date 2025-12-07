@@ -65,3 +65,9 @@ android/app/google-services.json
 
 #wandb
 backend/evaluation/wandb/
+
+android/app/.gradle/
+android/app/local.properties
+backend/rag/RAG_SERVICE_ARCHITECTURE.md
+backend/rag/plantae_wikipedia_content.json
+infra/

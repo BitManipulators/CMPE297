@@ -31,7 +31,7 @@ def mock_env_vars():
     os.environ["PINECONE_API_KEY"] = "test-pinecone-api-key"
     yield
     # Cleanup after all tests
-    for key in ["GOOGLE_CLIENT_ID", "GEMINI_API_KEY", "AWS_ACCESS_KEY_ID", 
+    for key in ["GOOGLE_CLIENT_ID", "GEMINI_API_KEY", "AWS_ACCESS_KEY_ID",
                 "AWS_SECRET_ACCESS_KEY", "AWS_REGION", "PINECONE_API_KEY"]:
         os.environ.pop(key, None)
 
@@ -116,19 +116,19 @@ class MockFirestoreDocument:
         self._data = data or {}
         self.exists = exists
         self.id = data.get("id", "mock-id") if data else "mock-id"
-    
+
     def to_dict(self):
         return self._data
-    
+
     def get(self):
         return self
-    
+
     def set(self, data: Dict):
         """Set document data"""
         self._data = data
         self.exists = True
         return self
-    
+
     def update(self, data: Dict):
         """Update document data"""
         self._data.update(data)
@@ -140,29 +140,29 @@ class MockFirestoreCollection:
     def __init__(self):
         self._documents: Dict[str, MockFirestoreDocument] = {}
         self._query_results = []
-    
+
     def document(self, doc_id: str):
         """Get or create document reference"""
         if doc_id not in self._documents:
             self._documents[doc_id] = MockFirestoreDocument({"id": doc_id}, exists=False)
         return self._documents[doc_id]
-    
+
     def add(self, data: Dict):
         """Add a document"""
         doc_id = data.get("id", f"auto-{len(self._documents)}")
         doc = MockFirestoreDocument(data)
         self._documents[doc_id] = doc
         return (None, doc)
-    
+
     def where(self, field: str, op: str, value):
         """Mock where query"""
         query = MockFirestoreQuery(self._documents, field, op, value)
         return query
-    
+
     def stream(self):
         """Stream all documents"""
         return iter(self._documents.values())
-    
+
     def set_document(self, doc_id: str, data: Dict):
         """Helper to set a document for testing"""
         self._documents[doc_id] = MockFirestoreDocument(data, exists=True)
@@ -176,23 +176,23 @@ class MockFirestoreQuery:
         self._limit_count = None
         self._order_field = None
         self._order_direction = None
-    
+
     def where(self, field: str, op: str, value):
         """Add filter"""
         self._filters.append((field, op, value))
         return self
-    
+
     def limit(self, count: int):
         """Limit results"""
         self._limit_count = count
         return self
-    
+
     def order_by(self, field: str, direction=None):
         """Order results"""
         self._order_field = field
         self._order_direction = direction
         return self
-    
+
     def stream(self):
         """Execute query and return results"""
         results = []
@@ -206,10 +206,10 @@ class MockFirestoreQuery:
                         break
             if matches:
                 results.append(doc)
-        
+
         if self._limit_count:
             results = results[:self._limit_count]
-        
+
         return iter(results)
 
 
@@ -217,7 +217,7 @@ class MockFirestoreClient:
     """Mock Firestore client"""
     def __init__(self):
         self._collections: Dict[str, MockFirestoreCollection] = {}
-    
+
     def collection(self, name: str):
         """Get or create collection"""
         if name not in self._collections:
@@ -237,7 +237,7 @@ def mock_firebase_admin(mocker, mock_firestore):
     mock_firebase = mocker.patch("firebase_admin.initialize_app")
     mock_credentials = mocker.patch("firebase_admin.credentials.Certificate")
     mock_firestore_client = mocker.patch("firebase_admin.firestore.client", return_value=mock_firestore)
-    
+
     return {
         "initialize_app": mock_firebase,
         "credentials": mock_credentials,
@@ -291,7 +291,7 @@ class MockGeminiModel:
     """Mock Gemini GenerativeModel"""
     def __init__(self, model_name: str = "gemini-2.5-flash"):
         self.model_name = model_name
-    
+
     def generate_content(self, prompt):
         """Mock content generation"""
         if isinstance(prompt, list):
@@ -331,7 +331,7 @@ def mock_gemini(mocker):
 def mock_bedrock(mocker):
     """Mock AWS Bedrock client"""
     mock_client = Mock()
-    
+
     # Mock embedding generation
     def mock_invoke_model(**kwargs):
         response = Mock()
@@ -341,10 +341,10 @@ def mock_bedrock(mocker):
         })
         response.__getitem__ = lambda self, key: Mock(read=lambda: response_body.encode())
         return response
-    
+
     mock_client.invoke_model = mock_invoke_model
     mock_boto3 = mocker.patch("boto3.client", return_value=mock_client)
-    
+
     return mock_client
 
 
@@ -361,13 +361,13 @@ class MockPineconeIndex:
         self.upsert = Mock(side_effect=self._upsert_impl)
         self.query = Mock(side_effect=self._query_impl)
         self.describe_index_stats = Mock(side_effect=self._describe_stats_impl)
-    
+
     def _upsert_impl(self, vectors: list):
         """Mock upsert operation"""
         for vector in vectors:
             self._vectors[vector["id"]] = vector
         return {"upserted_count": len(vectors)}
-    
+
     def _query_impl(self, vector: list, top_k: int = 5, include_metadata: bool = False):
         """Mock query operation"""
         # Return mock matches
@@ -378,11 +378,11 @@ class MockPineconeIndex:
             match.score = 0.9 - (i * 0.1)
             match.metadata = vec_data.get("metadata", {})
             matches.append(match)
-        
+
         result = Mock()
         result.matches = matches
         return result
-    
+
     def _describe_stats_impl(self):
         """Mock index stats"""
         stats = Mock()
@@ -399,27 +399,27 @@ class MockPineconeIndexInfo:
 def mock_pinecone(mocker):
     """Mock Pinecone client"""
     mock_index = MockPineconeIndex("test-index")
-    
+
     # Mock the list response with proper attributes and iterable
     class MockIndexList:
         def __init__(self):
             self.indexes = [MockPineconeIndexInfo("test-index")]
-        
+
         def __iter__(self):
             """Make the list iterable"""
             return iter(self.indexes)
-    
+
     mock_client = Mock()
     mock_client.list_indexes.return_value = MockIndexList()
     mock_client.create_index = Mock()
     mock_client.Index.return_value = mock_index
-    
+
     # Patch at both module level and import level
     mock_pinecone_class = mocker.patch("pinecone.Pinecone", return_value=mock_client)
     mocker.patch("rag_service.Pinecone", return_value=mock_client)
     mock_serverless = mocker.patch("pinecone.ServerlessSpec")
     mocker.patch("rag_service.ServerlessSpec", return_value=Mock())
-    
+
     return {
         "client": mock_client,
         "index": mock_index,

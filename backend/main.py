@@ -1498,10 +1498,63 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
     """WebSocket endpoint for real-time messaging"""
     await manager.connect(websocket, user_id)
 
+    # Ping interval in seconds
+    PING_INTERVAL = 30
+    last_pong_time = asyncio.get_event_loop().time()
+
+    async def send_ping():
+        """Send periodic ping to keep connection alive"""
+        nonlocal last_pong_time
+        while True:
+            try:
+                await asyncio.sleep(PING_INTERVAL)
+
+                # Check if we've received a pong recently
+                current_time = asyncio.get_event_loop().time()
+                time_since_pong = current_time - last_pong_time
+
+                if time_since_pong > PING_INTERVAL * 2:
+                    logger.warning(f"No pong received from {user_id} for {time_since_pong}s - closing connection")
+                    await websocket.close()
+                    break
+
+                # Send ping
+                await websocket.send_json({
+                    "type": "ping",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                logger.debug(f"Ping sent to user {user_id}")
+            except Exception as e:
+                logger.error(f"Error sending ping to {user_id}: {e}")
+                break
+
+    # Start ping task
+    ping_task = asyncio.create_task(send_ping())
+
     try:
         while True:
             data = await websocket.receive_json()
             message_type = data.get("type")
+
+            # Handle pong response - update last pong time and send acknowledgment
+            if message_type == "pong":
+                last_pong_time = asyncio.get_event_loop().time()
+                logger.debug(f"Pong received from user {user_id}")
+                # Send acknowledgment back so client knows server is alive
+                await websocket.send_json({
+                    "type": "pong_ack",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                continue
+
+            # Handle ping from client
+            if message_type == "ping":
+                await websocket.send_json({
+                    "type": "pong",
+                    "timestamp": datetime.utcnow().isoformat()
+                })
+                logger.debug(f"Pong sent to user {user_id}")
+                continue
 
             if message_type == "send_message":
                 # Handle new message
@@ -1830,9 +1883,11 @@ async def websocket_endpoint(websocket: WebSocket, user_id: str):
                 }, user_id)
 
     except WebSocketDisconnect:
+        ping_task.cancel()
         manager.disconnect(user_id)
         logger.info(f"User {user_id} disconnected")
     except Exception as e:
+        ping_task.cancel()
         logger.error(f"WebSocket error for user {user_id}: {e}")
         manager.disconnect(user_id)
 
