@@ -23,7 +23,7 @@ pip install -r requirements.txt
    - Add your API key: `GEMINI_API_KEY=your_api_key_here`
    - The AI bot will use mock responses if the API key is not configured
 
-3. (Optional) Configure Firebase:
+3. Configure Firebase:
    - Add your Firebase service account key as `serviceAccountKey.json` in the backend directory
    - Firebase will be automatically initialized if the key file is found
 

@@ -1,6 +1,6 @@
 # IntoTheWild - Flutter Chat Application
 
-A Flutter mobile chat application for survival guidance and plant recognition with offline-first capabilities, powered by AI and RAG (Retrieval-Augmented Generation).
+A Flutter mobile chat application for survival guidance and plant recognition powered by AI and RAG (Retrieval-Augmented Generation).
 
 ## Prerequisites
 

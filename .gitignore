@@ -63,5 +63,14 @@ backend/rag/__pycache__/
 terraform.tfstate
 android/app/google-services.json
 
+<<<<<<< HEAD
 #wandb
 backend/evaluation/wandb/
+=======
+
+android/app/.gradle/
+android/app/local.properties
+backend/rag/RAG_SERVICE_ARCHITECTURE.md
+backend/rag/plantae_wikipedia_content.json
+infra/
+>>>>>>> b632fc3 (updated Readme)
