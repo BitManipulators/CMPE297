@@ -124,10 +124,10 @@ A Flutter mobile chat application for survival guidance and plant recognition po
      GOOGLE_CLIENT_ID=your_web_client_id_here.apps.googleusercontent.com
      ```
 
-7. **Add plant data file**:
+7. **Add plant and animal data file**:
+   - Check this like for dataset: https://drive.google.com/drive/folders/1Jx5HmZPTK_-Rn-qzm4OF7VIZjy33Xr_o?usp=drive_link
    - Ensure `plantae_wikipedia_content.json` and `animalia_wikipedia_content.json` are present in `backend/rag/` directory
-   - This file contains plant information for the RAG system
-   - The file should be included in the repository or obtained separately
+   - This file contains plant and animal information for the RAG system
 
 8. **Run the backend server**:
    ```bash
