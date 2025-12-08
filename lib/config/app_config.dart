@@ -7,27 +7,11 @@ class AppConfig {
   // Use production URL for Android devices
   // Use localhost for web and other platforms
   static String get backendBaseUrl {
-    // On web, always use localhost
-    if (kIsWeb) {
-      return 'http://localhost:8001';
-    }
-    // On mobile platforms, check if Android
-    if (isAndroidPlatform()) {
-      return 'http://10.0.2.2:8001';
-    }
-    return 'http://localhost:8001';
+    return 'https://iotsmarthome.org/backend';
   }
 
   static String get websocketBaseUrl {
-    // On web, always use localhost
-    if (kIsWeb) {
-      return 'ws://localhost:8001';
-    }
-    // On mobile platforms, check if Android
-    if (isAndroidPlatform()) {
-      return 'ws://10.0.2.2:8001';
-    }
-    return 'ws://localhost:8001';
+    return 'wss://iotsmarthome.org/backend';
   }
 
   // Google OAuth Client ID

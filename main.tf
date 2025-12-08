@@ -314,32 +314,6 @@ resource "docker_registry_image" "flutter_push" {
   }
 }
 
-# A null_resource that executes the docker build command verbosely.
-# This is purely for displaying the output during 'terraform apply' execution.
-resource "null_resource" "verbose_flutter_docker_build" {
-  triggers = {
-    dir_sha1           = sha1(join("", [for f in fileset("./lib", "**") : filesha1("./lib/${f}")], [filesha1("./Dockerfile")]))
-  }
-
-  provisioner "local-exec" {
-    # The command runs docker build with the same arguments as the docker_image resource.
-    command = <<-EOT
-      echo "--- STARTING VERBOSE DOCKER BUILD FOR DEBUGGING ---"
-      docker build \
-        --platform linux/amd64 \
-        --tag ${aws_ecr_repository.flutter_app.repository_url}:latest \
-        --file Dockerfile \
-        --build-arg BACKEND_BASE_URL_ARG=${var.backend_base_url} \
-        --build-arg WEBSOCKET_BASE_URL_ARG=${var.websocket_base_url} \
-        ./
-      echo "--- VERBOSE DOCKER BUILD COMPLETE ---"
-    EOT
-
-    # Setting the interpreter to bash helps with multiline commands
-    interpreter = ["bash", "-c"] 
-  }
-}
-
 # ---------------------------------------------------------
 # 9. Flutter Frontend Deployment
 # ---------------------------------------------------------
