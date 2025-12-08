@@ -315,6 +315,47 @@ To remove the bot, type `/chat` in the conversation.
    curl -X POST http://localhost:8001/api/rag/index-plants
    ```
 
+## Observability with Firebase
+
+The application uses Firebase Analytics for observability and tracking user behavior, events, and application performance.
+
+### Setup
+
+1. **Firebase Project**: Ensure Firebase is initialized in your Flutter app (same project used for Firebase services)
+2. **Firebase Analytics**: Automatically enabled when Firebase Core is initialized
+3. **Configuration**: No additional configuration needed - analytics works out of the box
+
+### Tracked Events
+
+- **User Events**: Login, Logout, Sign Up
+- **Screen Views**: `login_screen`, `conversation_list_screen`, `chat_screen`
+- **Chat Events**: `chat_message_sent`, `image_uploaded` (with `conversation_type` parameter)
+- **Conversation Events**: `conversation_created`, `group_joined`, `group_left`
+
+### User Properties
+
+The following user properties are automatically set:
+- **User ID**: Set when user logs in
+- **Username**: Set when user logs in
+
+### Viewing Analytics
+
+1. **Firebase Console**:
+   - Go to [Firebase Console](https://console.firebase.google.com/)
+   - Select your project
+   - Navigate to **Analytics** → **Events**
+   - View real-time and historical event data
+
+2. **Key Metrics**: User engagement, event counts, retention, conversion funnels
+3. **Custom Reports**: Create reports filtered by events and user properties, export for analysis
+
+### Implementation Details
+
+- Analytics events are logged asynchronously and fail silently if Firebase is unavailable
+- Events are batched and sent to Firebase Analytics service
+- User privacy: Analytics respects user consent and privacy settings
+- No sensitive data is logged in event parameters
+
 ## Deployment Guide: Flutter Web + FastAPI on AWS EKS
 
 **Architecture Overview**
