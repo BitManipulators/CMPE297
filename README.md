@@ -14,6 +14,7 @@ A Flutter mobile chat application for survival guidance and plant recognition po
    - AWS credentials (for Bedrock embeddings)
    - Pinecone API key (for vector database)
    - Firebase service account key
+   - Google project Client ID (The same account used for firebase)
 
 ## Installation
 
@@ -66,7 +67,19 @@ A Flutter mobile chat application for survival guidance and plant recognition po
    pip install -r requirements.txt
    ```
 
-4. **Set up environment variables** (see Environment Variables section below)
+4. **Set up environment variables**
+
+   - Create `.env` file:
+
+   - Add your API keys to the `.env` file:
+   ```env
+   GEMINI_API_KEY=your_actual_key_here
+   AWS_ACCESS_KEY_ID=your_actual_key_here
+   AWS_SECRET_ACCESS_KEY=your_actual_secret_here
+   PINECONE_API_KEY=your_actual_key_here
+   AWS_REGION=us-west-2
+   GOOGLE_CLIENT_ID=your_actual_client_id
+
 
 5. **Configure Firebase (Creating serviceAccountKey.json for Firebase)**:
    - Go to the Firebase Console → Project Settings → Service Accounts.
@@ -75,71 +88,114 @@ A Flutter mobile chat application for survival guidance and plant recognition po
    - Place `serviceAccountKey.json` in the `backend/` directory
    - If not provided, the app will use in-memory storage
 
-6. **Add plant data file**:
+6. **Set up Google Project for SSO (Optional)**:
+   - Go to [Google Cloud Console](https://console.cloud.google.com/)
+   - Select the same project used for Firebase (or create a new project)
+   - Navigate to **APIs & Services** → **Credentials**
+   - Click **Create Credentials** → **OAuth client ID**
+   - If prompted, configure the OAuth consent screen:
+     - Choose **External** user type
+     - Fill in app name, user support email, and developer contact
+     - Add scopes: `email`, `profile`, `openid`
+     - Add test users if needed
+   - Create OAuth client IDs:
+     - **For Web**:
+       - Application type: **Web application**
+       - Name: `IntoTheWild Web Client`
+       - Authorized JavaScript origins:
+         - `http://localhost:8001` (for local development)
+         - `https://yourdomain.com` (for production)
+       - Authorized redirect URIs:
+         - `http://localhost:8001` (for local development)
+         - `https://yourdomain.com` (for production)
+       - Copy the **Client ID** (format: `xxxxx.apps.googleusercontent.com`)
+     - **For Android** (if using Android app):
+       - Application type: **Android**
+       - Name: `IntoTheWild Android Client`
+       - Package name: `com.example.into_the_wild`
+       - SHA-1 certificate fingerprint: Get from `keytool -list -v -keystore ~/.android/debug.keystore -alias androiddebugkey -storepass android -keypass android`
+       - Copy the **Client ID** (or use the one from `google-services.json`)
+   - Add the Web Client ID to your backend `.env` file:
+     ```env
+     GOOGLE_CLIENT_ID=your_web_client_id_here.apps.googleusercontent.com
+     ```
+   - For Flutter web: Create a `.env` file in the project root with:
+     ```env
+     GOOGLE_CLIENT_ID=your_web_client_id_here.apps.googleusercontent.com
+     ```
+
+7. **Add plant data file**:
    - Ensure `plantae_wikipedia_content.json` and `animalia_wikipedia_content.json` are present in `backend/rag/` directory
    - This file contains plant information for the RAG system
    - The file should be included in the repository or obtained separately
 
-6. **Run the backend server**:
+8. **Run the backend server**:
    ```bash
    python main.py
    ```
 
 
-### Setting Up Environment Variables
+## Generate Embeddings
 
-1. **Create `.env` file**:
+The system uses AWS Bedrock with Cohere models to generate embeddings and stores them in Pinecone vector database.
 
-2. **Add your API keys** to the `.env` file:
+### Prerequisites
+
+1. **AWS Bedrock Access**: Ensure Cohere `embed-english-v3` model is available in your AWS Bedrock account
+2. **Pinecone Account**: Create a Pinecone account and get your API key
+3. **Environment Variables**: Set the following in your `.env` file:
    ```env
-   GEMINI_API_KEY=your_actual_key_here
-   AWS_ACCESS_KEY_ID=your_actual_key_here
-   AWS_SECRET_ACCESS_KEY=your_actual_secret_here
-   PINECONE_API_KEY=your_actual_key_here
+   AWS_ACCESS_KEY_ID=your_aws_access_key
+   AWS_SECRET_ACCESS_KEY=your_aws_secret_key
    AWS_REGION=us-west-2
-   GOOGLE_CLIENT_ID=your_actual_client_id
+   PINECONE_API_KEY=your_pinecone_api_key
    ```
 
-## Plant Data File (`all_plants_streaming.json`)
+### How It Works
 
-The RAG system requires a plant knowledge base file containing information about various plants.
+1. **AWS Bedrock**: Uses `cohere.embed-english-v3` model to generate 1024-dimensional embeddings
+2. **Pinecone**: Stores embeddings in vector indexes for semantic search
+3. **Index Names**:
+   - Plants: `plant-knowledge-base-bedrock`
+   - Animals: `animal-knowledge-base-bedrock`
 
-### File Location
-- **Path**: `backend/rag/all_plants_streaming.json`
-- **Format**: JSON array containing plant objects
+### Indexing Plants
 
-### File Structure
-Each plant object in the JSON file should contain:
-- `scientific_name`: Scientific name of the plant
-- `common_name`: Common name(s) of the plant
-- `family`: Plant family
-- `genus`: Plant genus
-- `summary`: Brief summary about the plant
-- `content`: Detailed information about the plant
-- `wikipedia_url`: (Optional) Link to Wikipedia page
-
-### Setting Up the Plant Data File
-
-1. **Ensure the file exists**:
+1. **Ensure data file exists**:
    ```bash
-   ls backend/rag/all_plants_streaming.json
+   ls backend/rag/plantae_wikipedia_content.json
    ```
 
-2. **If the file is missing**, you need to:
-   - Obtain the `all_plants_streaming.json` file
-   - Place it in `backend/rag/` directory
-   - The file should contain a JSON array of plant objects
-
-3. **Index the plant data** (after setting up environment variables):
+2. **Run indexing script**:
    ```bash
    cd backend
    python index_plants.py
    ```
 
-   Or use the API endpoint:
+3. **The script will**:
+   - Load plant data from `plantae_wikipedia_content.json`
+   - Generate embeddings using AWS Bedrock (Cohere)
+   - Store embeddings in Pinecone index `plant-knowledge-base-bedrock`
+   - Process in batches of 100
+
+### Indexing Animals
+
+1. **Ensure data file exists**:
    ```bash
-   curl -X POST http://localhost:8001/api/rag/index-plants
+   ls backend/rag/animalia_wikipedia_content.json
    ```
+
+2. **Run indexing script**:
+   ```bash
+   cd backend
+   python index_animals.py
+   ```
+
+3. **The script will**:
+   - Load animal data from `animalia_wikipedia_content.json`
+   - Generate embeddings using AWS Bedrock (Cohere)
+   - Store embeddings in Pinecone index `animal-knowledge-base-bedrock`
+   - Process in batches of 100
 
 ## RAG System Setup
 
@@ -151,16 +207,11 @@ The RAG (Retrieval-Augmented Generation) system enhances AI responses with plant
 
 2. **Verify plant data file exists**:
    ```bash
-   ls backend/rag/all_plants_streaming.json
+   ls backend/rag/plantae_wikipedia_content.json
+   ls ls backend/rag/animalia_wikipedia_content.json
    ```
 
-3. **Index the plant data**:
-   ```bash
-   cd backend
-   python index_plants.py
-   ```
-
-4. **Verify RAG status**:
+3. **Verify RAG status**:
    ```bash
    curl http://localhost:8001/api/rag/status
    ```
@@ -171,6 +222,13 @@ The RAG (Retrieval-Augmented Generation) system enhances AI responses with plant
      "available": true,
      "index_name": "plant-knowledge-base-bedrock",
      "plants_cached": <number>,
+     "message": "RAG service is ready"
+   }
+
+   {
+     "available": true,
+     "index_name": "animal-knowledge-base-bedrock",
+     "animals_cached": <number>,
      "message": "RAG service is ready"
    }
    ```
@@ -196,9 +254,42 @@ To remove the bot, type `/chat` in the conversation.
 ### Frontend (Flutter App)
 
 1. **Text Messages**: Type in the text input and press send
-2. **Multi-User Chat**: Create or join conversations with other users
+2. **Multi-User Chat**: Create or join conversations with other users (Refer to **Testing Multi-User Conversations** section for more details)
 3. **AI Bot**: Type `/bot` to add AI assistance to any conversation
 4. **Remove Bot**: Type `/chat` to remove bot and continue with normal conversation
+
+### Testing Multi-User Conversations
+
+#### One-to-One Chat
+
+1. **Get User ID**:
+   - Open the app in a web browser
+   - Right-click and select **Inspect** (or press F12)
+   - Open the **Console** tab in Developer Tools
+   - Look for `userID` in the console logs or network requests
+   - Copy the user ID
+
+2. **Create One-to-One Conversation**:
+   - Click the **+** button to create a new conversation
+   - Select **One-to-One** as the conversation type
+   - In the **Participant IDs** field, enter the other user's ID (comma-separated if multiple)
+   - Click **Create**
+   - The conversation will connect both users
+
+**Note**: Adding a user ID in the participant ID box is **mandatory** for one-to-one chats.
+
+#### Group Chat
+
+1. **Create Group Chat**:
+   - Click the **+** button to create a new conversation
+   - Select **Group** as the conversation type
+   - Enter a **Group Name** (required)
+   - Click **Create**
+   - The group will be visible to all users who can join it
+
+2. **Join Group Chat**:
+   - Other users can see available groups in the conversation list
+   - Click on a group to join and start chatting
 
 ### Backend
 
