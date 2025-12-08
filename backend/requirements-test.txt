@@ -1,0 +1,27 @@
+# Test dependencies for backend
+# Install with: pip install -r requirements-test.txt
+
+botocore
+fastapi
+
+# Core testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-mock>=3.11.0
+pytest-cov>=4.1.0
+
+# HTTP testing for FastAPI - pinning to 0.24.x for compatibility
+httpx>=0.24.0,<0.25.0
+
+# Time/date mocking
+freezegun>=1.2.0
+
+# WebSocket testing
+websockets>=11.0
+python-socketio>=5.9.0
+
+# Faker for generating test data
+faker>=19.0.0
+
+# Additional utilities
+python-dotenv>=1.0.0
