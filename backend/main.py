@@ -297,9 +297,7 @@ class AIService:
         self.rag_service_plant = rag_service_plant
         self.rag_service_animal = rag_service_animal
         if GEMINI_AVAILABLE and gemini_api_key:
-            # Try different model names in order of preference
-            # gemini-1.5-flash is faster and more cost-effective
-            # gemini-1.5-pro is more capable but slower
+
             model_names = ['gemini-2.5-flash']
 
             for model_name in model_names:

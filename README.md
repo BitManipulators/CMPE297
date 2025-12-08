@@ -68,12 +68,15 @@ A Flutter mobile chat application for survival guidance and plant recognition po
 
 4. **Set up environment variables** (see Environment Variables section below)
 
-5. **Configure Firebase**:
+5. **Configure Firebase (Creating serviceAccountKey.json for Firebase)**:
+   - Go to the Firebase Console → Project Settings → Service Accounts.
+   - Click "Generate new private key" under the Firebase Admin SDK section.
+   - Confirm the prompt — a file named serviceAccountKey.json will be downloaded.
    - Place `serviceAccountKey.json` in the `backend/` directory
    - If not provided, the app will use in-memory storage
 
 6. **Add plant data file**:
-   - Ensure `all_plants_streaming.json` is present in `backend/rag/` directory
+   - Ensure `plantae_wikipedia_content.json` and `animalia_wikipedia_content.json` are present in `backend/rag/` directory
    - This file contains plant information for the RAG system
    - The file should be included in the repository or obtained separately
 
