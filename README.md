@@ -2,6 +2,42 @@
 
 A Flutter mobile chat application for survival guidance and plant recognition powered by AI and RAG (Retrieval-Augmented Generation).
 
+## Features
+
+### Core Features
+
+- **Multi-User Real-Time Chat**: Supports real-time messaging powered by WebSockets. Features both one-to-one and group conversations with instant message delivery and full synchronization across devices.
+
+- **User Authentication and Management**: Secure login through Google OAuth along with user registration, profile handling, and session management.
+
+- **Conversation Management**: Users can create and manage individual or group conversations, join or leave group chats at any time. The application also has persistent conversation history.
+
+- **Text Messaging**: Support for standard text messages and message storage using Firebase Firestore.
+
+- **Image Sharing**: Photos can be captured using the device camera, images can be selected from the gallery and shared on the chat interface directly.
+
+- **Voice Input**: Integrated speech-to-text with real-time voice transcription and smooth conversion of voice input into text messages.
+
+- **Push Notifications**: Mobile push notifications for incoming messages along with in-app alerts for active sessions.
+
+- **Analytics**: This includes event tracking for key user actions, screen view analytics and insights into user interaction patterns.
+
+- **Hybrid Cloud Architecture**: Deployment on AWS EKS with Kubernetes and Cloudflare for DNS and SSL management. Features multi-cloud integration across AWS, Google, and Firebase and infrastructure is automated through Terraform.
+
+### Innovative Features (Additional)
+
+- **Dynamic AI Bot Integration**: Add an AI assistant to any conversation using the `/bot` command. Using the `/chat` command removes the bot from the conversation. Users can also send queries to the bot directly in the command, for example: "/bot what is this plant?"
+
+- **Dual Domain RAG System**: Two separate vector indexes for plants and animals. The domain-specific knowledge is sourced from Wikipedia and features independent retrieval pipelines for better accuracy.
+
+- **Intelligent Query Intent Detection**: LLM-based classification to determine whether a user query is about plants, animals, both, or unclear. It also has automatic routing to the correct RAG domain along with optimized semantic search based on query type.
+
+- **AI-Powered Image Analysis**: Image understanding using the Gemini Vision API with automatic extraction of scientific names from images. The LLM also identifies plant and animal species and provides information on safety guidance for toxic plants and venomous animals.
+
+- **RAG-Enhanced AI Responses for Text and Image**: Semantic search with Amazon Bedrock Cohere embeddings and Pinecone vector database for efficient retrieval. The context-aware responses grounded in the knowledge base and document retrieval is chunked to improve accuracy.
+
+- **Context-Aware Conversation History**: Last ten messages considered for AI context and responses are tailored to ongoing conversation flow. It also maintains coherence in long multi-turn interactions.
+
 ## Prerequisites
 
 ### Frontend (Flutter)
